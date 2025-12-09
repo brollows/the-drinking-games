@@ -1,13 +1,23 @@
 import { Component } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { Router, RouterOutlet, NavigationEnd, RouterLink } from '@angular/router';
+import { NgIf } from '@angular/common';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet],
+  // VIKTIG: legg til RouterLink og NgIf her
+  imports: [RouterOutlet, RouterLink, NgIf],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
 export class AppComponent {
-  title = 'the-drinking-games';
+  isHomePage = true;
+
+  constructor(private router: Router) {
+    this.router.events.subscribe((event) => {
+      if (event instanceof NavigationEnd) {
+        this.isHomePage = event.urlAfterRedirects === '/';
+      }
+    });
+  }
 }

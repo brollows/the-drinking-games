@@ -1,0 +1,33 @@
+<section class="card">
+  <h2>Opprett spiller</h2>
+  <p class="subtitle">
+    Først lager du en spiller. Deretter kan du starte et nytt spill eller bli med på et eksisterende.
+  </p>
+
+  <div class="menu-buttons">
+    <div>
+      <label for="playerName">Spillernavn</label>
+      <input
+        id="playerName"
+        #playerNameInput
+        type="text"
+        placeholder="F.eks. Kongen av slurk"
+        class="text-input"
+      />
+    </div>
+
+    <button
+      class="btn primary"
+      (click)="onStartGame(playerNameInput.value)"
+    >
+      🚀 Start spill
+    </button>
+
+    <button
+      class="btn secondary"
+      (click)="onJoinGame(playerNameInput.value)"
+    >
+      🤝 Bli med på spill
+    </button>
+  </div>
+</section>
