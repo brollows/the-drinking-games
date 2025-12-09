@@ -1,0 +1,1 @@
+console.log("The Drinking Games er i gang! 🎉");
