@@ -1,41 +1,76 @@
+.round-wrapper {
+  position: relative;
+}
+
+/* Liten liv-counter oppe til høyre */
+.player-hud {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 10;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.player-lives {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #ffdddd;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.bigger-emoji {
+  font-size: 1.2rem;
+}
+
 .playing-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
+
+  width: 100%;
+  padding: 3%;
+  box-sizing: border-box;
 }
 
 .card-hand {
+  width: 100%;
   margin-top: 1.5rem;
   display: flex;
   justify-content: center;
   align-items: flex-end;
-  gap: 0;
   padding: 0 1rem;
+  box-sizing: border-box;
 }
 
 /* Selve kortet i hånda */
 .hand-card {
   position: relative;
-  width: 120px;
+  min-width: 120px;
   height: 170px;
   border-radius: 12px;
   border: 2px solid rgba(255, 255, 255, 0.2);
   background: #111;
   padding: 0.75rem;
-  margin-left: -60px;
+  margin-left: -20px;
   transform-origin: bottom center;
 
   /* 👉 alle kort starter litt nede, så valgt kort kan løftes */
-  transform:
-    translateY(8px)
-    rotate(calc((var(--i) - (var(--total) - 1) / 2) * 8deg));
+  transform: translateY(8px) rotate(calc((var(--i) - (var(--total) - 1) / 2) * 8deg));
 
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.45);
-  transition:
-    transform 0.15s ease,
-    box-shadow 0.15s ease,
-    opacity 0.15s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
   cursor: pointer;
 }
 
@@ -49,9 +84,7 @@
 }
 
 .hand-card.is-selected {
-  transform:
-    translateY(-10px)
-    rotate(calc((var(--i) - (var(--total) - 1) / 2) * 8deg));
+  transform: translateY(-10px) rotate(calc((var(--i) - (var(--total) - 1) / 2) * 8deg));
   box-shadow: 0 16px 32px rgba(0, 0, 0, 0.7);
   z-index: 2;
 }
@@ -70,18 +103,237 @@
 
 .hand-card-drink {
   font-weight: 600;
+  font-size: 0.6rem;
   color: white;
 }
 
 .card-details {
-  margin-top: 2rem;
   width: 100%;
   max-width: 420px;
+  margin-top: 2rem;
   text-align: left;
+  box-sizing: border-box;
 }
 
 .card-meta {
   font-size: 0.8rem;
   opacity: 0.7;
   margin-top: 0.5rem;
+}
+
+.hand-card.type-curse {
+  border-color: rgba(120, 180, 255, 0.35);
+  box-shadow: 0 8px 18px rgba(50, 120, 255, 0.25);
+  background: radial-gradient(circle at top, rgba(120, 180, 255, 0.18), transparent 55%), #111;
+}
+
+.hand-card.type-defence {
+  border-color: rgba(120, 255, 180, 0.4);
+  box-shadow: 0 8px 18px rgba(80, 200, 140, 0.35);
+  background: radial-gradient(circle at top, rgba(120, 255, 180, 0.18), transparent 55%), #111;
+}
+
+.hand-card.type-attack {
+  border-color: rgba(255, 120, 120, 0.4);
+  box-shadow: 0 8px 18px rgba(255, 80, 80, 0.35);
+  background: radial-gradient(circle at top, rgba(255, 120, 120, 0.18), transparent 55%), #111;
+}
+
+.hand-card.type-defence.is-selected {
+  box-shadow: 0 20px 40px rgba(80, 200, 140, 0.6);
+}
+.hand-card.type-curse.is-selected {
+  box-shadow: 0 20px 40px rgba(120, 180, 255, 0.6);
+}
+.hand-card.type-attack.is-selected {
+  box-shadow: 0 20px 40px rgba(255, 80, 80, 0.6);
+}
+
+.hand-card.type-defence .hand-card-title {
+  color: #b8ffd9;
+}
+.hand-card.type-curse .hand-card-title {
+  color: rgba(120, 180, 255, 0.6);
+}
+.hand-card.type-attack .hand-card-title {
+  color: #ffb8b8;
+}
+
+.waiting-state {
+  width: 100%;
+  padding: 3%;
+  box-sizing: border-box;
+
+  display: flex;
+  flex-direction: column;
+}
+
+.waiting-state h2 {
+  text-align: center;
+}
+
+.waiting-state .subtitle {
+  margin-top: 2.5rem;
+  text-align: center;
+  opacity: 0.9;
+}
+
+.divider {
+  margin: 1rem 0;
+  opacity: 0.3;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.waiting-player-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.waiting-player-row {
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.waiting-player-row.is-current {
+  border-color: rgba(255, 215, 0, 0.9);
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.35);
+  background: radial-gradient(circle at top, rgba(255, 215, 0, 0.12), transparent 55%),
+    rgba(0, 0, 0, 0.7);
+}
+
+.waiting-card {
+  margin-top: 1.5rem;
+}
+
+.wp-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.wp-name {
+  font-weight: 600;
+}
+
+.wp-lives {
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.wp-meta {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+
+.waiting-attack-wrapper {
+  margin-top: 1rem;
+  display: flex;
+  justify-content: center;
+}
+
+/* Overstyr hånd-layout for enkeltkort i waiting */
+.waiting-hand-card {
+  margin-left: 0;
+  transform: translateY(0) rotate(0);
+  cursor: default;
+}
+
+/* 🎯 TARGET-SELECTION (velg hvem som får kortet) */
+
+.target-select {
+  margin-top: 1.75rem;
+  padding: 0.9rem 0.9rem 1.1rem;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
+}
+
+.target-select h3 {
+  font-size: 0.95rem;
+  margin: 0;
+  text-align: left;
+}
+
+/* Scrollbar-container */
+.target-list {
+  margin: 0.75rem 0 0.5rem;
+  padding: 0;
+  list-style: none;
+
+  max-height: 200px; /* 👈 begrenser høyden */
+  overflow-y: auto; /* 👈 scrolling hvis mange spillere */
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+/* Hver rad */
+.target-row {
+  width: 100%;
+}
+
+/* Selve knappen per spiller */
+.target-button {
+  width: 100%;
+  padding: 0.55rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(10, 10, 10, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+
+  font-size: 0.9rem;
+  cursor: pointer;
+  color: white;
+
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.08s ease,
+    box-shadow 0.12s ease;
+}
+
+.target-button:hover {
+  background: rgba(25, 25, 25, 0.95);
+  border-color: rgba(255, 255, 255, 0.28);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.65);
+}
+
+/* Når en spiller er valgt */
+.target-button.is-selected {
+  border-color: rgba(255, 215, 0, 0.9);
+  box-shadow: 0 0 14px rgba(255, 215, 0, 0.4);
+  background: radial-gradient(circle at top, rgba(255, 215, 0, 0.16), transparent 60%),
+    rgba(10, 10, 10, 0.95);
+}
+
+/* Tekst inni knappen */
+.target-name {
+  font-weight: 600;
+  color: white;
+}
+
+.target-lives {
+  font-size: 0.85rem;
+  opacity: 0.9;
+  color: white;
+}
+
+/* Knapperad under lista */
+.target-actions {
+  margin-top: 0.75rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }

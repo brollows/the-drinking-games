@@ -23,7 +23,7 @@ export class PlayComponent implements OnInit, OnDestroy {
     private gameSession: GameSessionService,
     private player: PlayerService,
     private cdr: ChangeDetectorRef // 👈 ny
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     this.session = this.gameSession.currentSession;
@@ -89,7 +89,6 @@ export class PlayComponent implements OnInit, OnDestroy {
     }
   }
 
-
   trackPlayer(index: number, player: Player) {
     return player.id;
   }
@@ -109,6 +108,7 @@ export class PlayComponent implements OnInit, OnDestroy {
     try {
       // Oppdater state i databasen – dette er signalet til alle andre
       await this.gameSession.setSessionPhase(this.session.id, 'round');
+      await this.gameSession.startRound(this.session.id);
 
       // Host går direkte til round-siden
       await this.router.navigate(['/round', this.session.id]);
@@ -116,5 +116,4 @@ export class PlayComponent implements OnInit, OnDestroy {
       console.error('Kunne ikke starte runde:', e);
     }
   }
-
 }

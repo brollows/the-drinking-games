@@ -1,8 +1,10 @@
 <section class="round-wrapper">
-  <!-- STARTING -->
-  <ng-container *ngIf="viewState === 'starting'">
-    <ng-container *ngTemplateOutlet="starting"></ng-container>
-  </ng-container>
+  <div
+    class="player-hud"
+    *ngIf="currentLives !== null && viewState !== 'lost' && viewState !== 'finished'"
+  >
+    <div class="player-lives">{{ currentLives }} <span class="bigger-emoji">🍻</span></div>
+  </div>
 
   <!-- PLAYING -->
   <ng-container *ngIf="viewState === 'playing'">
@@ -12,6 +14,11 @@
   <!-- WAITING -->
   <ng-container *ngIf="viewState === 'waiting'">
     <ng-container *ngTemplateOutlet="waiting"></ng-container>
+  </ng-container>
+
+  <!-- DRINKING -->
+  <ng-container *ngIf="viewState === 'drinking'">
+    <ng-container *ngTemplateOutlet="drinking"></ng-container>
   </ng-container>
 
   <!-- LOST -->
@@ -27,17 +34,8 @@
 
 <!--Alle statene er under-->
 
-<!-- Innholdet du hadde i starting-state.html -->
-<ng-template #starting>
-  <!-- TODO: lag fin startskjerm her -->
-  <section class="card">
-    <h2>Start runde</h2>
-    <p>Vent til host starter spillet, eller klikk klar.</p>
-  </section>
-</ng-template>
-
 <ng-template #playing>
-  <section class="card playing-state">
+  <section class="playing-state">
     <h2>Din tur</h2>
     <p class="subtitle">Velg et kort å spille 🍻</p>
 
@@ -47,15 +45,16 @@
         *ngFor="let c of hand; let i = index"
         class="hand-card"
         [class.is-selected]="i === selectedIndex"
+        [class.type-attack]="c.type === 'attack'"
+        [class.type-defence]="c.type === 'defence'"
+        [class.type-curse]="c.type === 'curse'"
         (click)="onSelectCard(i)"
         [style.--i]="i"
         [style.--total]="hand.length"
       >
         <div class="hand-card-title">{{ c.title }}</div>
         <div class="hand-card-body">
-          <div class="hand-card-drink">
-            {{ c.drinkAmount }} slurk
-          </div>
+          <div class="hand-card-drink">{{ getCardTypeUpper(c) }}</div>
         </div>
       </button>
     </div>
@@ -66,23 +65,163 @@
       <p>{{ selectedCard.description }}</p>
 
       <p class="card-meta">
-        {{ selectedCard.drinkAmount }} slurk
-        • Passiv: {{ selectedCard.passive.join(', ') }}
+        {{ selectedCard.drinkAmount }} slurk • Passiv:
+        {{ selectedCard.passive.join(', ') }}
       </p>
 
-      <button class="btn primary">
+      <!-- Hvis vi IKKE er i target-modus: vanlig "Spill" knapp -->
+      <button class="btn primary" *ngIf="!selectingTarget" (click)="onPlaySelectedCard()">
         Spill dette kortet
       </button>
+
+      <!-- TARGET-SELECTION UI -->
+      <div class="target-select" *ngIf="selectingTarget && pendingCardToPlay">
+        <h3 style="margin-top: 1.5rem">Velg hvem som skal få kortet</h3>
+
+        <ul class="target-list">
+          <li *ngFor="let p of targetCandidates" class="target-row">
+            <button
+              type="button"
+              class="target-button"
+              [class.is-selected]="p.id === selectedTargetId"
+              (click)="onSelectTarget(p.id)"
+            >
+              <span class="target-name">{{ p.name }}</span>
+              <span class="target-lives">{{ p.lives }} 🍻</span>
+            </button>
+          </li>
+        </ul>
+
+        <div class="target-actions">
+          <button class="btn secondary" type="button" (click)="onCancelTargetSelection()">
+            Avbryt
+          </button>
+          <button
+            class="btn primary"
+            type="button"
+            (click)="onConfirmTargetSelection()"
+            [disabled]="!selectedTargetId"
+          >
+            Bekreft mål
+          </button>
+        </div>
+      </div>
     </div>
   </section>
 </ng-template>
 
-
 <!-- waiting-state.html -->
 <ng-template #waiting>
-  <section class="card">
-    <h2>Venter...</h2>
-    <p>Det er en annen spiller sin tur.</p>
+  <section class="waiting-state">
+    <h2>Venter på tur</h2>
+
+    <!-- sist spilte kort hvis det finnes -->
+    <ng-container *ngIf="lastPlayedCard; else noLastCard">
+      <ng-container *ngIf="lastPlayedCard.type === 'attack'; else nonAttackInfo">
+        <p class="subtitle">
+          <strong>{{ lastPlayedBy?.name }}</strong>
+          sendte et angrep til
+          <strong>{{ lastPlayedTarget?.name || 'en spiller' }}</strong>
+          🍻
+        </p>
+
+        <div class="waiting-attack-wrapper">
+          <button
+            class="hand-card waiting-hand-card"
+            [class.type-attack]="lastPlayedCard.type === 'attack'"
+            disabled
+          >
+            <div class="hand-card-title">{{ lastPlayedCard.title }}</div>
+            <div class="hand-card-body">
+              <div class="hand-card-drink">
+                {{ getCardTypeUpper(lastPlayedCard) }}
+              </div>
+            </div>
+          </button>
+        </div>
+      </ng-container>
+
+      <ng-template #nonAttackInfo>
+        <p class="subtitle">
+          <strong>{{ lastPlayedBy?.name }}</strong>
+          spilte et
+          <strong>{{ lastPlayedCard.type.toUpperCase() }}</strong
+          >-kort 🍻
+        </p>
+      </ng-template>
+    </ng-container>
+
+    <ng-template #noLastCard>
+      <p class="subtitle" *ngIf="currentTurnPlayer; else noCurrent">
+        Det er <strong>{{ currentTurnPlayer.name }}</strong> sin tur 🍻
+      </p>
+
+      <ng-template #noCurrent>
+        <p class="subtitle">Venter på at neste spiller skal velges...</p>
+      </ng-template>
+    </ng-template>
+
+    <hr class="divider" />
+
+    <h3>Spillere i spillet</h3>
+
+    <ul class="waiting-player-list" *ngIf="players.length; else noPlayers">
+      <li
+        *ngFor="let p of players"
+        class="waiting-player-row"
+        [class.is-current]="p.id === currentTurnPlayerId"
+      >
+        <div class="wp-main">
+          <span class="wp-name">{{ p.name }}</span>
+          <span class="wp-lives">{{ p.lives }} 🍻</span>
+        </div>
+
+        <div class="wp-meta" *ngIf="p.id === currentTurnPlayerId">Spiller nå</div>
+        <div class="wp-meta" *ngIf="p.id !== currentTurnPlayerId">Venter på tur</div>
+      </li>
+    </ul>
+
+    <ng-template #noPlayers>
+      <p>Ingen spillere registrert i denne sessionen 🤔</p>
+    </ng-template>
+  </section>
+</ng-template>
+
+<ng-template #drinking>
+  <section class="waiting-state">
+    <h2>Du er under angrep! 😈</h2>
+
+    <p class="subtitle">
+      <strong>{{ lastPlayedBy?.name }}</strong>
+      sendte dette kortet til deg:
+    </p>
+
+    <div class="waiting-attack-wrapper" *ngIf="lastPlayedCard">
+      <button
+        class="hand-card waiting-hand-card"
+        [class.type-attack]="lastPlayedCard.type === 'attack'"
+        disabled
+      >
+        <div class="hand-card-title">{{ lastPlayedCard.title }}</div>
+        <div class="hand-card-body">
+          <div class="hand-card-drink">
+            {{ getCardTypeUpper(lastPlayedCard) }}
+          </div>
+        </div>
+      </button>
+    </div>
+
+    <div class="card-details waiting-card-details" *ngIf="lastPlayedCard">
+      <p>{{ lastPlayedCard.description }}</p>
+      <p class="card-meta">
+        {{ lastPlayedCard.drinkAmount }} slurk
+        <!-- TODO: senere kan vi vise "inkl. curses/defence" eksplisitt -->
+      </p>
+    </div>
+
+    <button class="btn primary" (click)="onConfirmDrank()" style="margin-top: 1.5rem">
+      Jeg har drukket 🍻
+    </button>
   </section>
 </ng-template>
 
