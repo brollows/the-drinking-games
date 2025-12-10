@@ -1,31 +1,37 @@
 <section class="card">
-  <ng-container *ngIf="session; else noSession">
-    <h2>Game</h2>
+  <h2>Game</h2>
 
-    <p class="subtitle">
-      Del koden med vennene dine så de kan bli med på spillet 👇
-    </p>
+  <p class="subtitle">
+    Del koden med vennene dine så de kan bli med på spillet 👇
+  </p>
 
-    <div class="join-code">
-      {{ session.joinCode }}
-    </div>
+  <div class="join-code">
+    {{ getSessionCode() }}
+  </div>
 
-    <p>
-      Host: <strong>{{ session.hostName }}</strong>
-    </p>
+  <button 
+    class="btn primary" 
+    *ngIf="playerName === session?.hostName"
+    (click)="onStartRound()"
+    style="margin-top: 1rem;"
+  >
+    Start spill
+  </button>
 
-    <p style="opacity: 0.7; font-size: 0.85rem;">
-      Opprettet: {{ session.createdAt | date: 'shortTime' }}
-    </p>
+  <hr style="margin: 1.5rem 0; opacity: 0.4;">
 
-    <!-- hvis du vil vise hvem DU er i tillegg -->
-    <p *ngIf="playerName" style="margin-top: 1rem;">
-      Du er logget inn som <strong>{{ playerName }}</strong>
-    </p>
-  </ng-container>
+  <h3>Spillere i dette spillet</h3>
 
-  <ng-template #noSession>
-    <h2>Ingen aktiv session 🤔</h2>
-    <p>Gå tilbake til hovedmenyen og trykk “Spill” for å starte et nytt spill.</p>
-  </ng-template>
+  <ul class="player-list">
+    <li
+      *ngFor="let p of players; trackBy: trackPlayer"
+      class="player-row"
+      [class.is-host]="p.isHost"
+    >
+      <div class="player-main">
+        <span class="player-name">{{ p.name }}</span>
+        <span *ngIf="p.isHost" class="badge host-badge">Host</span>
+      </div>
+    </li>
+  </ul>
 </section>

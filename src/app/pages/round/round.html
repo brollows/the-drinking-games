@@ -1,0 +1,103 @@
+<section class="round-wrapper">
+  <!-- STARTING -->
+  <ng-container *ngIf="viewState === 'starting'">
+    <ng-container *ngTemplateOutlet="starting"></ng-container>
+  </ng-container>
+
+  <!-- PLAYING -->
+  <ng-container *ngIf="viewState === 'playing'">
+    <ng-container *ngTemplateOutlet="playing"></ng-container>
+  </ng-container>
+
+  <!-- WAITING -->
+  <ng-container *ngIf="viewState === 'waiting'">
+    <ng-container *ngTemplateOutlet="waiting"></ng-container>
+  </ng-container>
+
+  <!-- LOST -->
+  <ng-container *ngIf="viewState === 'lost'">
+    <ng-container *ngTemplateOutlet="lost"></ng-container>
+  </ng-container>
+
+  <!-- FINISHED -->
+  <ng-container *ngIf="viewState === 'finished'">
+    <ng-container *ngTemplateOutlet="finished"></ng-container>
+  </ng-container>
+</section>
+
+<!--Alle statene er under-->
+
+<!-- Innholdet du hadde i starting-state.html -->
+<ng-template #starting>
+  <!-- TODO: lag fin startskjerm her -->
+  <section class="card">
+    <h2>Start runde</h2>
+    <p>Vent til host starter spillet, eller klikk klar.</p>
+  </section>
+</ng-template>
+
+<ng-template #playing>
+  <section class="card playing-state">
+    <h2>Din tur</h2>
+    <p class="subtitle">Velg et kort å spille 🍻</p>
+
+    <!-- HÅNDEN -->
+    <div class="card-hand" *ngIf="hand.length">
+      <button
+        *ngFor="let c of hand; let i = index"
+        class="hand-card"
+        [class.is-selected]="i === selectedIndex"
+        (click)="onSelectCard(i)"
+        [style.--i]="i"
+        [style.--total]="hand.length"
+      >
+        <div class="hand-card-title">{{ c.title }}</div>
+        <div class="hand-card-body">
+          <div class="hand-card-drink">
+            {{ c.drinkAmount }} slurk
+          </div>
+        </div>
+      </button>
+    </div>
+
+    <!-- DETALJER FOR VALGT KORT -->
+    <div class="card-details" *ngIf="selectedCard">
+      <h3>{{ selectedCard.title }}</h3>
+      <p>{{ selectedCard.description }}</p>
+
+      <p class="card-meta">
+        {{ selectedCard.drinkAmount }} slurk
+        • Passiv: {{ selectedCard.passive.join(', ') }}
+      </p>
+
+      <button class="btn primary">
+        Spill dette kortet
+      </button>
+    </div>
+  </section>
+</ng-template>
+
+
+<!-- waiting-state.html -->
+<ng-template #waiting>
+  <section class="card">
+    <h2>Venter...</h2>
+    <p>Det er en annen spiller sin tur.</p>
+  </section>
+</ng-template>
+
+<!-- lost-state.html -->
+<ng-template #lost>
+  <section class="card">
+    <h2>Du er ute 😵</h2>
+    <p>Du kan fortsatt følge med på spillet.</p>
+  </section>
+</ng-template>
+
+<!-- finished-state.html -->
+<ng-template #finished>
+  <section class="card">
+    <h2>Spillet er ferdig 🎉</h2>
+    <p>Her kan vi vise hvem som vant og evt. "nytt spill".</p>
+  </section>
+</ng-template>

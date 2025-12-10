@@ -1,0 +1,87 @@
+.playing-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.card-hand {
+  margin-top: 1.5rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 0;
+  padding: 0 1rem;
+}
+
+/* Selve kortet i hånda */
+.hand-card {
+  position: relative;
+  width: 120px;
+  height: 170px;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  background: #111;
+  padding: 0.75rem;
+  margin-left: -60px;
+  transform-origin: bottom center;
+
+  /* 👉 alle kort starter litt nede, så valgt kort kan løftes */
+  transform:
+    translateY(8px)
+    rotate(calc((var(--i) - (var(--total) - 1) / 2) * 8deg));
+
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.45);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
+  cursor: pointer;
+}
+
+.hand-card:first-child {
+  margin-left: 0;
+}
+
+.hand-card:hover {
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.55);
+  /* evt. opacity: 0.9; */
+}
+
+.hand-card.is-selected {
+  transform:
+    translateY(-10px)
+    rotate(calc((var(--i) - (var(--total) - 1) / 2) * 8deg));
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.7);
+  z-index: 2;
+}
+
+.hand-card-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+  color: white;
+}
+
+.hand-card-body {
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.hand-card-drink {
+  font-weight: 600;
+  color: white;
+}
+
+.card-details {
+  margin-top: 2rem;
+  width: 100%;
+  max-width: 420px;
+  text-align: left;
+}
+
+.card-meta {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  margin-top: 0.5rem;
+}

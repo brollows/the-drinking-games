@@ -15,38 +15,53 @@ export class CreateUserComponent {
     private router: Router,
     private gameSession: GameSessionService,
     private player: PlayerService
-  ) {}
+  ) { }
 
-  onStartGame(playerName: string) {
-    const trimmed = playerName?.trim();
-
-    if (!trimmed) {
+  async onStartGame(playerName: string) {
+    if (!playerName?.trim()) {
       alert('Skriv inn et spillernavn først 🙃');
       return;
     }
 
-    // lagre spillernavnet både i minnet og localStorage
-    this.player.setName(trimmed);
+    try {
+      this.player.setName(playerName);
 
-    // Opprett host-session (lokalt nå, Supabase senere)
-    this.gameSession.createHostSession(trimmed);
+      const session = await this.gameSession.createHostSession(playerName.trim());
 
-    // Naviger til spillskjermen
-    this.router.navigate(['/play']);
+      // Her kan du f.eks. lagre joinCode i PlayerService eller bare logge:
+      console.log('Session opprettet med kode:', session.joinCode);
+
+      this.router.navigate(['/play']);
+    } catch (e) {
+      console.error(e);
+      alert('Klarte ikke å opprette spill. Prøv igjen 🥲');
+    }
   }
 
-  onJoinGame(playerName: string) {
-    const trimmed = playerName?.trim();
 
-    if (!trimmed) {
-      alert('Skriv inn et spillernavn først 🙃');
-      return;
+  async onJoinGame(playerName: string, joinCode: string) {
+    const normalizedCode = joinCode.trim().toUpperCase();
+    const trimmedName = playerName.trim();
+
+    if (!normalizedCode || !trimmedName) {
+      throw new Error('Mangler kode eller navn');
     }
 
-    // Også her lagrer vi navnet, så det er tilgjengelig videre
-    this.player.setName(trimmed);
+    try {
+      const session = await this.gameSession.joinSession(normalizedCode, playerName);
+      this.player.setName(playerName);
+      console.log('Joinet session:', session);
+      this.router.navigate(['/play']);
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message ?? 'Kunne ikke bli med på spillet 🥲');
+    }
+  }
 
-    // TODO: senere: gå til /join eller lignende
-    alert('Join-spill logikken kommer senere 😄');
+  getPlayerName() {
+    if (!this.player.hasName()) {
+      return '';
+    }
+    return this.player.getName();
   }
 }

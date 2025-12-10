@@ -13,6 +13,7 @@
         type="text"
         placeholder="F.eks. Kongen av slurk"
         class="text-input"
+        [value]="getPlayerName()"
       />
     </div>
 
@@ -20,14 +21,26 @@
       class="btn primary"
       (click)="onStartGame(playerNameInput.value)"
     >
-      🚀 Start spill
+      Start spill
     </button>
+    <br>
+
+        <div>
+      <label for="joinCode">Spillkode</label>
+      <input
+        id="joinCode"
+        #joinCodeInput
+        type="text"
+        placeholder="F.eks. ABCD"
+        class="text-input"
+      />
+    </div>
 
     <button
       class="btn secondary"
-      (click)="onJoinGame(playerNameInput.value)"
+      (click)="onJoinGame(playerNameInput.value, joinCodeInput.value)"
     >
-      🤝 Bli med på spill
+      Bli med på spill
     </button>
   </div>
 </section>

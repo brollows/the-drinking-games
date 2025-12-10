@@ -1,6 +1,7 @@
 import { Component } from '@angular/core';
 import { Router, RouterOutlet, NavigationEnd, RouterLink } from '@angular/router';
 import { NgIf } from '@angular/common';
+import { SupabaseService } from './services/supabase.service';
 
 @Component({
   selector: 'app-root',
@@ -11,13 +12,34 @@ import { NgIf } from '@angular/common';
   styleUrl: './app.css',
 })
 export class AppComponent {
-  isHomePage = true;
+  showHomeButton = true;
 
-  constructor(private router: Router) {
+  constructor(
+    private router: Router,
+    private supabase: SupabaseService) {
     this.router.events.subscribe((event) => {
       if (event instanceof NavigationEnd) {
-        this.isHomePage = event.urlAfterRedirects === '/';
+        const url = event.urlAfterRedirects;
+        const isHome = url === '/';
+        const isRound = url.startsWith('/round/');
+
+        this.showHomeButton = !(isHome || isRound);
       }
     });
+  }
+
+  async ngOnInit() {
+    console.log('Tester Supabase connection...');
+
+    const { data, error } = await this.supabase.client
+      .from('game_sessions')
+      .select('*')
+      .limit(1);
+
+    if (error) {
+      console.error('Supabase ERROR:', error);
+    } else {
+      console.log("Supabase OK! ");
+    }
   }
 }

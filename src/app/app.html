@@ -2,7 +2,7 @@
   <router-outlet></router-outlet>
 
   <!-- FOOTER – vises bare når IKKE på home -->
-  <footer *ngIf="!isHomePage">
+  <footer *ngIf="showHomeButton">
     <button class="btn secondary" [routerLink]="['/']">
       ⬅ Home
     </button>
