@@ -33,4 +33,13 @@ export const ATTACK_CARDS: Card[] = [
     drinkAmount: 3,
     passive: ['none'],
   },
+  {
+    id: 'atk-005',
+    type: 'attack',
+    title: 'Russian roulette',
+    description:
+      'Dekke kortet kan ikke velges hvem som får. Det blir sendt random til noen, inkludert deg selv, uten å kunne blokkes eller redusere antall slurker!',
+    drinkAmount: 10,
+    passive: ['random'],
+  },
 ];

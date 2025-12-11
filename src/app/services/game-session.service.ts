@@ -413,98 +413,6 @@ export class GameSessionService {
     }
   }
 
-  async resolveAttackAndAdvanceTurn(
-    sessionId: string,
-    targetPlayerId: string,
-    getCardById: (id: string) => Card
-  ): Promise<void> {
-    const roundState = await this.getRoundState(sessionId);
-    if (!roundState || !roundState.pendingAttack || !roundState.pendingAttackCardId) {
-      throw new Error('Ingen aktivt angrep å resolvere');
-    }
-
-    if (roundState.pendingAttackToPlayerId !== targetPlayerId) {
-      throw new Error('Dette angrepet er ikke på denne spilleren');
-    }
-
-    const card = getCardById(roundState.pendingAttackCardId);
-
-    const { data: effects, error: effError } = await this.supabase.client
-      .from('player_effects')
-      .select('*')
-      .eq('session_id', sessionId)
-      .eq('player_id', targetPlayerId);
-
-    if (effError) {
-      console.error('Feil ved henting av effekter:', effError);
-      throw effError;
-    }
-
-    const defenceEffects = (effects ?? []).filter((e) => e.effect_type === 'defence');
-    const curseEffects = (effects ?? []).filter((e) => e.effect_type === 'curse');
-
-    let total = card.drinkAmount;
-    total += curseEffects.length;
-    total -= defenceEffects.length;
-    if (total < 0) total = 0;
-
-    const { data: target, error: targetError } = await this.supabase.client
-      .from('players')
-      .select('*')
-      .eq('id', targetPlayerId)
-      .single();
-
-    if (targetError || !target) {
-      console.error('Feil ved henting av target player:', targetError);
-      throw targetError ?? new Error('Fant ikke spiller');
-    }
-
-    const newLives = Math.max(0, (target.lives ?? 0) - total);
-
-    const { error: livesError } = await this.supabase.client
-      .from('players')
-      .update({ lives: newLives })
-      .eq('id', targetPlayerId);
-
-    if (livesError) {
-      console.error('Feil ved oppdatering av liv:', livesError);
-      throw livesError;
-    }
-
-    const effIdsToDelete = (effects ?? []).map((e) => e.id);
-    if (effIdsToDelete.length > 0) {
-      const { error: delError } = await this.supabase.client
-        .from('player_effects')
-        .delete()
-        .in('id', effIdsToDelete);
-
-      if (delError) {
-        console.error('Feil ved sletting av effekter:', delError);
-      }
-    }
-
-    const nextIndex =
-      roundState.turnOrder.length === 0
-        ? 0
-        : (roundState.currentTurnIndex + 1) % roundState.turnOrder.length;
-
-    const { error: rsError } = await this.supabase.client
-      .from('round_state')
-      .update({
-        pending_attack: false,
-        pending_attack_card_id: null,
-        pending_attack_from_player_id: null,
-        pending_attack_to_player_id: null,
-        current_turn_index: nextIndex,
-      })
-      .eq('session_id', sessionId);
-
-    if (rsError) {
-      console.error('Feil ved oppdatering av round_state etter resolusjon:', rsError);
-      throw rsError;
-    }
-  }
-
   // game-session.service.ts
 
   async advanceTurn(sessionId: string): Promise<void> {
@@ -529,6 +437,121 @@ export class GameSessionService {
     if (error) {
       console.error('Feil ved advanceTurn:', error);
       throw error;
+    }
+  }
+
+  async getPlayerEffectsForSession(sessionId: string, playerId: string): Promise<PlayerEffect[]> {
+    const { data, error } = await this.supabase.client
+      .from('player_effects')
+      .select('*')
+      .eq('session_id', sessionId)
+      .eq('player_id', playerId);
+
+    if (error) {
+      console.error('Feil ved henting av player_effects:', error);
+      throw error;
+    }
+
+    if (!data) return [];
+
+    return data.map((e) => ({
+      id: e.id,
+      sessionId: e.session_id,
+      playerId: e.player_id,
+      cardId: e.card_id,
+      effectType: e.effect_type,
+      createdAt: e.created_at,
+    })) as PlayerEffect[];
+  }
+
+  async deletePlayerEffect(effectId: string): Promise<void> {
+    const { error } = await this.supabase.client.from('player_effects').delete().eq('id', effectId);
+
+    if (error) {
+      console.error('Feil ved sletting av player_effect:', error);
+      throw error;
+    }
+  }
+
+  async resolveAttackClientSide(
+    sessionId: string,
+    targetPlayerId: string,
+    totalDrinks: number,
+    usedEffectIds: string[]
+  ): Promise<void> {
+    // Hent round_state for å verifisere at det faktisk er et aktivt angrep
+    const roundState = await this.getRoundState(sessionId);
+    if (!roundState || !roundState.pendingAttack || !roundState.pendingAttackCardId) {
+      throw new Error('Ingen aktivt angrep å resolvere (client-side).');
+    }
+
+    if (roundState.pendingAttackToPlayerId !== targetPlayerId) {
+      throw new Error('Dette angrepet er ikke på denne spilleren.');
+    }
+
+    // Clamp totalDrinks
+    if (totalDrinks < 0) {
+      totalDrinks = 0;
+    }
+
+    // Hent target player
+    const { data: target, error: targetError } = await this.supabase.client
+      .from('players')
+      .select('*')
+      .eq('id', targetPlayerId)
+      .single();
+
+    if (targetError || !target) {
+      console.error('Feil ved henting av target player:', targetError);
+      throw targetError ?? new Error('Fant ikke spiller');
+    }
+
+    const newLives = Math.max(0, (target.lives ?? 0) - totalDrinks);
+
+    const { error: livesError } = await this.supabase.client
+      .from('players')
+      .update({ lives: newLives })
+      .eq('id', targetPlayerId);
+
+    if (livesError) {
+      console.error('Feil ved oppdatering av liv (client-side):', livesError);
+      throw livesError;
+    }
+
+    // Slett kun effektene som faktisk ble brukt i denne drinking-sekvensen
+    if (usedEffectIds && usedEffectIds.length > 0) {
+      const { error: delError } = await this.supabase.client
+        .from('player_effects')
+        .delete()
+        .in('id', usedEffectIds);
+
+      if (delError) {
+        console.error('Feil ved sletting av brukte player_effects (client-side):', delError);
+        // Ikke throw her nødvendigvis – lives er allerede oppdatert,
+        // men du kan velge å kaste feil om du vil gjøre det hardt.
+      }
+    }
+
+    // Beregn neste spiller
+    const nextIndex =
+      roundState.turnOrder.length === 0
+        ? 0
+        : (roundState.currentTurnIndex + 1) % roundState.turnOrder.length;
+
+    const { error: rsError } = await this.supabase.client
+      .from('round_state')
+      .update({
+        pending_attack: false,
+        pending_attack_card_id: null,
+        pending_attack_from_player_id: null,
+        pending_attack_to_player_id: null,
+        current_turn_index: nextIndex,
+      })
+      .eq('session_id', sessionId);
+
+    if (rsError) {
+      console.error('Feil ved oppdatering av round_state etter client-side resolusjon:', rsError);
+      throw rsError;
     }
   }
 }

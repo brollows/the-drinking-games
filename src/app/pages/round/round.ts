@@ -1,7 +1,12 @@
 import { Component, OnInit, ChangeDetectorRef, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
-import { GameSessionService, Player, RoundState } from '../../services/game-session.service';
+import {
+  GameSessionService,
+  Player,
+  PlayerEffect,
+  RoundState,
+} from '../../services/game-session.service';
 import { CardService } from '../../cards/card.service';
 import { Card } from '../../cards/card';
 
@@ -35,6 +40,16 @@ export class RoundComponent implements OnInit, OnDestroy {
   targetCandidates: Player[] = [];
   pendingCardToPlay: Card | null = null;
   selectedTargetId: string | null = null;
+
+  // Effekter relatert til et pågående angrep
+  pendingAttackCard: Card | null = null;
+  pendingAttackEffects: PlayerEffect[] = [];
+  attackSequenceCards: Card[] = []; // [attack, ...curses, ...defences]
+  pendingAttackTotalDrinks: number | null = null;
+  pendingAttackTarget: Player | null = null;
+
+  // Hvilke player_effect-rader som faktisk ble brukt i denne drinking-sekvensen
+  usedEffectIds: string[] = [];
 
   private me: Player | null = null;
   private pollingInterval: any = null;
@@ -119,6 +134,8 @@ export class RoundComponent implements OnInit, OnDestroy {
 
       // sist spilte kort + hvem som spilte / fikk det
       this.syncLastPlayedFromRoundState();
+
+      await this.syncPendingAttackEffects();
 
       // bestemme viewState, men ikke override lost/finished
       if (this.viewState !== 'lost' && this.viewState !== 'finished') {
@@ -289,16 +306,16 @@ export class RoundComponent implements OnInit, OnDestroy {
     if (!me || !sessionId) return;
 
     try {
-      await this.gameSession.resolveAttackAndAdvanceTurn(sessionId, me.id, (id) =>
-        this.cards.getCardById(id)
-      );
-      // Etter dette:
-      // - lives er oppdatert
-      // - effekter er brukt opp
-      // - currentTurnIndex er flyttet til neste spiller
-      // refreshState() tar seg av UI
+      const total = this.pendingAttackTotalDrinks ?? this.pendingAttackCard?.drinkAmount ?? 0;
+
+      const effectIdsToDelete = [...this.usedEffectIds];
+
+      await this.gameSession.resolveAttackClientSide(sessionId, me.id, total, effectIdsToDelete);
+
+      // Etter vellykket sletting og livsoppdatering:
+      this.usedEffectIds = [];
     } catch (e) {
-      console.error('Feil ved resolveAttackAndAdvanceTurn:', e);
+      console.error('Feil ved resolveAttackClientSide:', e);
     }
   }
 
@@ -337,5 +354,280 @@ export class RoundComponent implements OnInit, OnDestroy {
     this.targetCandidates = [];
     this.pendingCardToPlay = null;
     this.selectedTargetId = null;
+  }
+
+  /**
+   * Marker at et effektkort (player_effect) er brukt,
+   * basert på Card + effectType ('curse' / 'defence').
+   * Vi plukker første PlayerEffect som matcher cardId + type
+   * og som IKKE allerede ligger i usedEffectIds.
+   */
+  private markEffectUsedForCard(card: Card, effectType: 'curse' | 'defence') {
+    if (!this.pendingAttackEffects?.length) return;
+
+    const effect = this.pendingAttackEffects.find(
+      (e) =>
+        e.cardId === card.id && e.effectType === effectType && !this.usedEffectIds.includes(e.id)
+    );
+
+    if (effect) {
+      this.usedEffectIds.push(effect.id);
+    }
+  }
+
+  private async syncPendingAttackEffects() {
+    const rs = this.roundState;
+    const sessionId = this.sessionId;
+
+    if (
+      !rs ||
+      !sessionId ||
+      !rs.pendingAttack ||
+      !rs.pendingAttackToPlayerId ||
+      !rs.pendingAttackCardId
+    ) {
+      this.pendingAttackCard = null;
+      this.pendingAttackEffects = [];
+      this.attackSequenceCards = [];
+      this.pendingAttackTotalDrinks = null;
+      this.pendingAttackTarget = null;
+      return;
+    }
+
+    this.pendingAttackTarget =
+      this.players.find((p) => p.id === rs.pendingAttackToPlayerId) ?? null;
+
+    try {
+      this.pendingAttackEffects = await this.gameSession.getPlayerEffectsForSession(
+        sessionId,
+        rs.pendingAttackToPlayerId
+      );
+    } catch (e) {
+      console.error('Feil ved henting av pendingAttackEffects:', e);
+      this.pendingAttackEffects = [];
+    }
+
+    try {
+      this.pendingAttackCard = this.cards.getCardById(rs.pendingAttackCardId);
+    } catch {
+      this.pendingAttackCard = null;
+    }
+
+    if (!this.pendingAttackCard) {
+      this.attackSequenceCards = [];
+      this.pendingAttackTotalDrinks = null;
+      return;
+    }
+
+    const curseCards: Card[] = this.pendingAttackEffects
+      .filter((e) => e.effectType === 'curse')
+      .map((e) => this.cards.getCardById(e.cardId))
+      .filter((c): c is Card => !!c);
+
+    const defenceCards: Card[] = this.pendingAttackEffects
+      .filter((e) => e.effectType === 'defence')
+      .map((e) => this.cards.getCardById(e.cardId))
+      .filter((c): c is Card => !!c);
+
+    // Rekkefølge: attack -> curse -> defence
+    this.attackSequenceCards = [this.pendingAttackCard, ...curseCards, ...defenceCards];
+
+    let total = 0;
+    let baseSet = false; // om vi har satt grunnverdien (fra attack)
+    let skipRemainingEffects = false; // brukes ved attack + random
+
+    for (const card of this.attackSequenceCards) {
+      // Hvis attack var random, skal vi skippe alle curse/defence etterpå uten å bruke eller fjerne dem
+      if (skipRemainingEffects && card.type !== 'attack') {
+        continue;
+      }
+
+      switch (card.type) {
+        case 'attack': {
+          let localBaseSet = false;
+
+          if (!card.passive || card.passive.length === 0) {
+            // Ingen passiv → bruk bare kortets drinkingAmount
+            total = card.drinkAmount;
+            baseSet = true;
+            localBaseSet = true;
+          } else {
+            // For attack: i praksis none / random
+            for (const passive of card.passive) {
+              switch (passive) {
+                case 'none':
+                  total = card.drinkAmount;
+                  baseSet = true;
+                  localBaseSet = true;
+                  break;
+
+                case 'random':
+                  // Attack er random → ingen curse/defence får påvirke
+                  total = card.drinkAmount;
+                  baseSet = true;
+                  localBaseSet = true;
+                  skipRemainingEffects = true;
+                  break;
+
+                // resten ikke brukt på attack nå:
+                case 'double':
+                case 'half':
+                case 'increase':
+                case 'reduce':
+                case 'reflect':
+                case 'shield':
+                case 'skip':
+                default:
+                  break;
+              }
+            }
+
+            if (!localBaseSet) {
+              // Fall-back: hvis ingen passiv faktisk gjorde noe, bruk kortets verdi
+              total = card.drinkAmount;
+              baseSet = true;
+            }
+          }
+          break;
+        }
+
+        case 'curse': {
+          if (!baseSet) {
+            // Har ikke noe å modifisere ennå (burde ikke skje, siden attack alltid er først)
+            break;
+          }
+
+          if (!card.passive || card.passive.length === 0) {
+            // Ingen passiv → gjør ingenting
+          } else {
+            // curse: typisk increase/double/half – skip brukes når spilleren skal miste tur, ikke her
+            let usedEffect = false;
+
+            for (const passive of card.passive) {
+              switch (passive) {
+                case 'increase':
+                  total += card.drinkAmount;
+                  usedEffect = true;
+                  break;
+
+                case 'double':
+                  total *= 2;
+                  usedEffect = true;
+                  break;
+
+                case 'half':
+                  total = Math.ceil(total / 2);
+                  usedEffect = true;
+                  break;
+
+                // ikke brukt i denne fasen:
+                case 'none':
+                case 'random':
+                case 'reduce':
+                case 'reflect':
+                case 'shield':
+                case 'skip':
+                default:
+                  break;
+              }
+            }
+
+            if (usedEffect) {
+              // Curse-kortet er brukt i denne drinking → logg effect-id for sletting
+              this.markEffectUsedForCard(card, 'curse');
+            }
+          }
+          break;
+        }
+
+        case 'defence': {
+          if (!baseSet) {
+            // Ingen base-verdi å forsvare mot
+            break;
+          }
+
+          if (!card.passive || card.passive.length === 0) {
+            // Ingen passiv → gjør ingenting
+          } else {
+            // i teorien: shield, reduce, half, reflect
+            let usedEffect = false;
+
+            for (const passive of card.passive) {
+              switch (passive) {
+                case 'shield':
+                  total = 0;
+                  usedEffect = true;
+                  break;
+
+                case 'reduce':
+                  total = Math.max(0, total - card.drinkAmount);
+                  usedEffect = true;
+                  break;
+
+                case 'half':
+                  total = Math.ceil(total / 2);
+                  usedEffect = true;
+                  break;
+
+                case 'reflect':
+                  // TODO: senere – nå bare nuller vi target sin damage
+                  total = 0;
+                  usedEffect = true;
+                  break;
+
+                // ikke brukt i denne fasen:
+                case 'none':
+                case 'skip':
+                case 'double':
+                case 'increase':
+                case 'random':
+                default:
+                  break;
+              }
+            }
+
+            if (usedEffect) {
+              // Defence-kortet er brukt i denne drinking → logg effect-id for sletting
+              this.markEffectUsedForCard(card, 'defence');
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    if (total < 0) total = 0;
+    this.pendingAttackTotalDrinks = total;
+  }
+
+  getEffect(card: Card): string {
+    // beholder type på engelsk – evt. uppercased hvis du vil ha mer “label”-preg
+    return card.type.toUpperCase(); // ATTACK / CURSE / DEFENCE
+  }
+
+  getCardPassive(card: Card): string {
+    if (!card.passive || !card.passive.length) {
+      return 'none';
+    }
+    // viser passives som "reduce, double, shield"
+    return card.passive.join(', ');
+  }
+
+  getAttackTotalBreakdown(): string {
+    if (!this.pendingAttackCard) {
+      return '';
+    }
+
+    const base = this.pendingAttackCard.drinkAmount;
+    const total = this.pendingAttackTotalDrinks ?? base;
+
+    const baseStr = `${base} slurk${base === 1 ? '' : 'er'}`;
+    const totalStr = `${total} slurk${total === 1 ? '' : 'er'}`;
+
+    if (total === base) {
+      return `Base: ${baseStr} (ingen effekter endret antallet).`;
+    }
+
+    return `Base: ${baseStr} → Totalt: ${totalStr} etter curse/defence-effekter.`;
   }
 }

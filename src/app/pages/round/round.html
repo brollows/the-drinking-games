@@ -1,11 +1,10 @@
+<div
+  class="player-hud"
+  *ngIf="currentLives !== null && viewState !== 'lost' && viewState !== 'finished'"
+>
+  <div class="player-lives">{{ currentLives }} <span class="bigger-emoji">🍻</span></div>
+</div>
 <section class="round-wrapper">
-  <div
-    class="player-hud"
-    *ngIf="currentLives !== null && viewState !== 'lost' && viewState !== 'finished'"
-  >
-    <div class="player-lives">{{ currentLives }} <span class="bigger-emoji">🍻</span></div>
-  </div>
-
   <!-- PLAYING -->
   <ng-container *ngIf="viewState === 'playing'">
     <ng-container *ngTemplateOutlet="playing"></ng-container>
@@ -64,7 +63,7 @@
       <h3>{{ selectedCard.title }}</h3>
       <p class="card-details-description">{{ selectedCard.description }}</p>
 
-      <p class="card-meta">
+      <p class="card-meta" [ngClass]="'card-type-' + selectedCard.type">
         {{ selectedCard.drinkAmount }} slurk • Passiv:
         {{ selectedCard.passive.join(', ') }}
       </p>
@@ -117,6 +116,7 @@
 
     <!-- sist spilte kort hvis det finnes -->
     <ng-container *ngIf="lastPlayedCard; else noLastCard">
+      <!-- ATTACK-kort -->
       <ng-container *ngIf="lastPlayedCard.type === 'attack'; else nonAttackInfo">
         <p class="subtitle">
           <strong>{{ lastPlayedBy?.name }}</strong>
@@ -139,18 +139,62 @@
             </div>
           </button>
         </div>
+
+        <!-- Beskrivelse til attack-kortet sammen med kortet -->
+        <p class="attack-description" *ngIf="pendingAttackCard">
+          {{ pendingAttackCard.description }}
+        </p>
+
+        <!-- Sekvens + total slurker (for alle som ser på) -->
+        <div class="effect-sequence" *ngIf="attackSequenceCards.length && pendingAttackTarget">
+          <h3>Effekter i spill</h3>
+
+          <!-- Curse + Defence som kort, under attack-kortet -->
+          <div class="effect-cards-row" *ngIf="attackSequenceCards.length > 1">
+            <button
+              *ngFor="let c of attackSequenceCards.slice(1)"
+              class="hand-card effect-card"
+              [class.type-attack]="c.type === 'attack'"
+              [class.type-defence]="c.type === 'defence'"
+              [class.type-curse]="c.type === 'curse'"
+              disabled
+            >
+              <div class="hand-card-title">{{ c.title }}</div>
+              <div class="hand-card-body">
+                <div class="hand-card-drink">{{ getCardTypeUpper(c) }}</div>
+                <div class="hand-card-passive">{{ getCardPassive(c) }}</div>
+              </div>
+            </button>
+          </div>
+
+          <p class="total-drinks" *ngIf="pendingAttackTarget && pendingAttackCard">
+            {{ pendingAttackTarget.name }}
+            må drikke
+            {{ pendingAttackTotalDrinks ?? pendingAttackCard.drinkAmount }}
+            slurk{{
+              (pendingAttackTotalDrinks ?? pendingAttackCard.drinkAmount) === 1 ? '' : 'er'
+            }}.
+          </p>
+
+          <!-- Enkel "utregning" tekst -->
+          <p class="calc-details" *ngIf="pendingAttackCard">
+            {{ getAttackTotalBreakdown() }}
+          </p>
+        </div>
       </ng-container>
 
+      <!-- Ikke-angrep kort -->
       <ng-template #nonAttackInfo>
         <p class="subtitle">
           <strong>{{ lastPlayedBy?.name }}</strong>
           spilte et
-          <strong>{{ lastPlayedCard.type.toUpperCase() }}</strong
+          <strong>{{ getCardTypeUpper(lastPlayedCard) }}</strong
           >-kort 🍻
         </p>
       </ng-template>
     </ng-container>
 
+    <!-- Ingen sist spilte kort -->
     <ng-template #noLastCard>
       <p class="subtitle" *ngIf="currentTurnPlayer; else noCurrent">
         Det er <strong>{{ currentTurnPlayer.name }}</strong> sin tur 🍻
@@ -189,33 +233,62 @@
 
 <ng-template #drinking>
   <section class="waiting-state">
-    <h2>Du er under angrep! 😈</h2>
-
     <p class="subtitle">
       <strong>{{ lastPlayedBy?.name }}</strong>
       sendte dette kortet til deg:
     </p>
 
-    <div class="waiting-attack-wrapper" *ngIf="lastPlayedCard">
+    <div class="waiting-attack-wrapper" *ngIf="pendingAttackCard">
       <button
         class="hand-card waiting-hand-card"
-        [class.type-attack]="lastPlayedCard.type === 'attack'"
+        [class.type-attack]="pendingAttackCard.type === 'attack'"
         disabled
       >
-        <div class="hand-card-title">{{ lastPlayedCard.title }}</div>
+        <div class="hand-card-title">{{ pendingAttackCard.title }}</div>
         <div class="hand-card-body">
           <div class="hand-card-drink">
-            {{ getCardTypeUpper(lastPlayedCard) }}
+            {{ getCardTypeUpper(pendingAttackCard) }}
           </div>
         </div>
       </button>
     </div>
 
-    <div class="card-details waiting-card-details" *ngIf="lastPlayedCard">
-      <p>{{ lastPlayedCard.description }}</p>
-      <p class="card-meta">
-        {{ lastPlayedCard.drinkAmount }} slurk
-        <!-- TODO: senere kan vi vise "inkl. curses/defence" eksplisitt -->
+    <!-- Beskrivelse sammen med kortet -->
+    <p class="attack-description" *ngIf="pendingAttackCard">
+      {{ pendingAttackCard.description }}
+    </p>
+
+    <!-- Curse + Defence som kort -->
+    <div class="effect-sequence" *ngIf="attackSequenceCards.length > 1">
+      <h3>Effekter i spill</h3>
+
+      <div class="effect-cards-row">
+        <button
+          *ngFor="let c of attackSequenceCards.slice(1)"
+          class="hand-card effect-card"
+          [class.type-attack]="c.type === 'attack'"
+          [class.type-defence]="c.type === 'defence'"
+          [class.type-curse]="c.type === 'curse'"
+          disabled
+        >
+          <div class="hand-card-title">{{ c.title }}</div>
+          <div class="hand-card-body">
+            <div class="hand-card-drink">{{ getCardTypeUpper(c) }}</div>
+            <div class="hand-card-passive">{{ getCardPassive(c) }}</div>
+          </div>
+        </button>
+      </div>
+    </div>
+
+    <div class="card-details waiting-card-details" *ngIf="pendingAttackCard">
+      <p class="card-meta" [ngClass]="'card-type-' + pendingAttackCard.type">
+        Du må drikke
+        {{ pendingAttackTotalDrinks ?? pendingAttackCard.drinkAmount }}
+        slurker.
+      </p>
+
+      <p class="calc-details">
+        {{ getAttackTotalBreakdown() }}
       </p>
     </div>
 
