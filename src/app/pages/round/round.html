@@ -4,7 +4,8 @@
 >
   <div class="player-lives">{{ currentLives }} <span class="bigger-emoji">🍻</span></div>
 </div>
-<section class="round-wrapper">
+
+<section class="round-wrapper" [class.is-my-turn]="viewState === 'playing'">
   <!-- PLAYING -->
   <ng-container *ngIf="viewState === 'playing'">
     <ng-container *ngTemplateOutlet="playing"></ng-container>

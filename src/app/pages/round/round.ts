@@ -20,7 +20,6 @@ import { Card } from '../../cards/card';
 export class RoundComponent implements OnInit, OnDestroy {
   sessionId: string | null = null;
 
-  // 👇 nå med 'drinking' også
   viewState: 'playing' | 'waiting' | 'drinking' | 'lost' | 'finished' = 'waiting';
 
   hand: Card[] = [];
@@ -41,14 +40,12 @@ export class RoundComponent implements OnInit, OnDestroy {
   pendingCardToPlay: Card | null = null;
   selectedTargetId: string | null = null;
 
-  // Effekter relatert til et pågående angrep
   pendingAttackCard: Card | null = null;
   pendingAttackEffects: PlayerEffect[] = [];
-  attackSequenceCards: Card[] = []; // [attack, ...curses, ...defences]
+  attackSequenceCards: Card[] = [];
   pendingAttackTotalDrinks: number | null = null;
   pendingAttackTarget: Player | null = null;
 
-  // Hvilke player_effect-rader som faktisk ble brukt i denne drinking-sekvensen
   usedEffectIds: string[] = [];
 
   private me: Player | null = null;
@@ -76,16 +73,13 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     console.log('Round page for session:', this.sessionId);
 
-    // hvem er jeg (lokalt cached player fra GameSessionService)
     this.me = this.gameSession.currentPlayer ?? null;
 
-    // gi meg en test-hånd
-    this.dealInitialHand(3);
+    // 🃏 Start-hånd: alltid [DEFENCE, CURSE, ATTACK]
+    this.dealInitialHand();
 
-    // første oppdatering
     await this.refreshState();
 
-    // polling av både players + round_state
     this.pollingInterval = setInterval(() => {
       this.refreshState();
     }, 500);
@@ -111,7 +105,6 @@ export class RoundComponent implements OnInit, OnDestroy {
 
       const meId = this.me?.id ?? null;
 
-      // oppdater "meg" fra players-lista (så lives er fresh)
       if (meId) {
         const meFromList = this.players.find((p) => p.id === meId) ?? null;
         if (meFromList) {
@@ -120,24 +113,20 @@ export class RoundComponent implements OnInit, OnDestroy {
         }
       }
 
-      // hvis jeg er død => lost view
       if (this.currentLives !== null && this.currentLives <= 0) {
         this.viewState = 'lost';
       }
 
-      // hvem har tur?
       if (roundState && roundState.turnOrder.length > 0) {
         this.currentTurnPlayerId = roundState.turnOrder[roundState.currentTurnIndex] ?? null;
       } else {
         this.currentTurnPlayerId = null;
       }
 
-      // sist spilte kort + hvem som spilte / fikk det
       this.syncLastPlayedFromRoundState();
 
       await this.syncPendingAttackEffects();
 
-      // bestemme viewState, men ikke override lost/finished
       if (this.viewState !== 'lost' && this.viewState !== 'finished') {
         this.updateViewStateFromRoundState();
       }
@@ -184,19 +173,15 @@ export class RoundComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // 🧨 1) Pending attack trumfer alt:
     if (rs.pendingAttack) {
-      // Jeg er target → jeg er i DRINKING
       if (rs.pendingAttackToPlayerId === meId) {
         this.viewState = 'drinking';
       } else {
-        // Jeg er ikke target → jeg bare venter
         this.viewState = 'waiting';
       }
       return;
     }
 
-    // ✅ 2) Ingen pending attack: vanlig tur-logikk
     const currentTurnId = rs.turnOrder[rs.currentTurnIndex] ?? null;
 
     if (currentTurnId === meId) {
@@ -206,15 +191,30 @@ export class RoundComponent implements OnInit, OnDestroy {
     }
   }
 
-  private dealInitialHand(count: number) {
-    this.hand = [];
-    for (let i = 0; i < count; i++) {
-      const card = this.cards.drawFromAll();
-      this.hand.push(card);
+  // 🔁 Helper: bygg hånd slik at vi ALLTID har 1 av hver type i rekkefølge:
+  // [DEFENCE, CURSE, ATTACK]
+  private buildHandWithOneOfEach(remaining: Card[] = []) {
+    const types: Array<Card['type']> = ['defence', 'curse', 'attack'];
+    const newHand: Card[] = [];
+
+    for (const type of types) {
+      const idx = remaining.findIndex((c) => c.type === type);
+      if (idx !== -1) {
+        newHand.push(remaining[idx]);
+      } else {
+        newHand.push(this.cards.drawRandom(type));
+      }
     }
 
+    this.hand = newHand;
+    // default-markér siste (attack)
     this.selectedIndex = this.hand.length > 0 ? this.hand.length - 1 : null;
-    console.log('Hånd delt ut:', this.hand);
+    console.log('Ny hånd (1 av hver type):', this.hand);
+  }
+
+  // 🃏 Første gang vi deler ut
+  private dealInitialHand() {
+    this.buildHandWithOneOfEach();
   }
 
   onSelectCard(index: number) {
@@ -239,7 +239,6 @@ export class RoundComponent implements OnInit, OnDestroy {
     return player.id;
   }
 
-  // 🧨 Spiller med tur trykker "Spill dette kortet"
   async onPlaySelectedCard() {
     const card = this.selectedCard;
     const me = this.me;
@@ -251,17 +250,15 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     try {
       if (card.type === 'defence') {
-        // DEFENCE: alltid på deg selv
         await this.gameSession.playDefenceCard(sessionId, me.id, card.id);
         await this.gameSession.advanceTurn(sessionId);
 
-        // Fjern kortet fra hånda og trekk nytt
+        // 🃏 Etter spill: erstatt brukt kort, beholde 1 av hver type
         this.removePlayedCardAndDrawNew();
         return;
       }
 
       if (card.type === 'attack' || card.type === 'curse') {
-        // Gå inn i target selection-modus
         const candidates = this.players.filter((p) => p.id !== me.id && p.lives > 0);
 
         if (!candidates.length) {
@@ -272,33 +269,32 @@ export class RoundComponent implements OnInit, OnDestroy {
         this.selectingTarget = true;
         this.targetCandidates = candidates;
         this.pendingCardToPlay = card;
-        this.selectedTargetId = candidates[0].id; // preselect første
+        this.selectedTargetId = candidates[0].id;
         return;
       }
-
-      // skulle ikke skje, men bare i tilfelle vi får nye typer senere
     } catch (e) {
       console.error('Feil ved spilling av kort:', e);
     }
   }
 
+  // 🃏 Ny logikk: behold 1 DEFENCE, 1 CURSE, 1 ATTACK – erstatt kun typen som ble spilt
   private removePlayedCardAndDrawNew() {
     if (this.selectedIndex != null) {
-      this.hand.splice(this.selectedIndex, 1);
+      const remaining = this.hand.filter((_, i) => i !== this.selectedIndex);
+      // Bygg opp hånda på nytt med 1 av hver type
+      this.buildHandWithOneOfEach(remaining);
+    } else {
+      // fallback – sørg for at hånda fortsatt er "1 av hver"
+      this.buildHandWithOneOfEach(this.hand);
     }
 
-    const newCard = this.cards.drawFromAll();
-    this.hand.push(newCard);
-    this.selectedIndex = this.hand.length - 1;
-
-    // reset target-valg state
+    // reset target-state
     this.selectingTarget = false;
     this.targetCandidates = [];
     this.pendingCardToPlay = null;
     this.selectedTargetId = null;
   }
 
-  // 🍻 Target (drinking-state) trykker "Jeg har drukket"
   async onConfirmDrank() {
     const me = this.me;
     const sessionId = this.sessionId;
@@ -312,7 +308,6 @@ export class RoundComponent implements OnInit, OnDestroy {
 
       await this.gameSession.resolveAttackClientSide(sessionId, me.id, total, effectIdsToDelete);
 
-      // Etter vellykket sletting og livsoppdatering:
       this.usedEffectIds = [];
     } catch (e) {
       console.error('Feil ved resolveAttackClientSide:', e);
@@ -336,13 +331,13 @@ export class RoundComponent implements OnInit, OnDestroy {
     try {
       if (card.type === 'attack') {
         await this.gameSession.playAttackCard(sessionId, me.id, targetId, card.id);
-        // IKKE advance turn – skjer når target trykker "Jeg har drukket"
+        // turn flyttes når target trykker "Jeg har drukket"
       } else if (card.type === 'curse') {
         await this.gameSession.playCurseCard(sessionId, me.id, targetId, card.id);
-        // Curse avslutter turen med én gang
         await this.gameSession.advanceTurn(sessionId);
       }
 
+      // Erstatt brukt kort, behold 1 av hver type
       this.removePlayedCardAndDrawNew();
     } catch (e) {
       console.error('Feil ved bekreftelse av target:', e);
@@ -356,12 +351,6 @@ export class RoundComponent implements OnInit, OnDestroy {
     this.selectedTargetId = null;
   }
 
-  /**
-   * Marker at et effektkort (player_effect) er brukt,
-   * basert på Card + effectType ('curse' / 'defence').
-   * Vi plukker første PlayerEffect som matcher cardId + type
-   * og som IKKE allerede ligger i usedEffectIds.
-   */
   private markEffectUsedForCard(card: Card, effectType: 'curse' | 'defence') {
     if (!this.pendingAttackEffects?.length) return;
 
@@ -429,15 +418,13 @@ export class RoundComponent implements OnInit, OnDestroy {
       .map((e) => this.cards.getCardById(e.cardId))
       .filter((c): c is Card => !!c);
 
-    // Rekkefølge: attack -> curse -> defence
     this.attackSequenceCards = [this.pendingAttackCard, ...curseCards, ...defenceCards];
 
     let total = 0;
-    let baseSet = false; // om vi har satt grunnverdien (fra attack)
-    let skipRemainingEffects = false; // brukes ved attack + random
+    let baseSet = false;
+    let skipRemainingEffects = false;
 
     for (const card of this.attackSequenceCards) {
-      // Hvis attack var random, skal vi skippe alle curse/defence etterpå uten å bruke eller fjerne dem
       if (skipRemainingEffects && card.type !== 'attack') {
         continue;
       }
@@ -447,12 +434,10 @@ export class RoundComponent implements OnInit, OnDestroy {
           let localBaseSet = false;
 
           if (!card.passive || card.passive.length === 0) {
-            // Ingen passiv → bruk bare kortets drinkingAmount
             total = card.drinkAmount;
             baseSet = true;
             localBaseSet = true;
           } else {
-            // For attack: i praksis none / random
             for (const passive of card.passive) {
               switch (passive) {
                 case 'none':
@@ -462,28 +447,18 @@ export class RoundComponent implements OnInit, OnDestroy {
                   break;
 
                 case 'random':
-                  // Attack er random → ingen curse/defence får påvirke
                   total = card.drinkAmount;
                   baseSet = true;
                   localBaseSet = true;
                   skipRemainingEffects = true;
                   break;
 
-                // resten ikke brukt på attack nå:
-                case 'double':
-                case 'half':
-                case 'increase':
-                case 'reduce':
-                case 'reflect':
-                case 'shield':
-                case 'skip':
                 default:
                   break;
               }
             }
 
             if (!localBaseSet) {
-              // Fall-back: hvis ingen passiv faktisk gjorde noe, bruk kortets verdi
               total = card.drinkAmount;
               baseSet = true;
             }
@@ -492,15 +467,10 @@ export class RoundComponent implements OnInit, OnDestroy {
         }
 
         case 'curse': {
-          if (!baseSet) {
-            // Har ikke noe å modifisere ennå (burde ikke skje, siden attack alltid er først)
-            break;
-          }
+          if (!baseSet) break;
 
           if (!card.passive || card.passive.length === 0) {
-            // Ingen passiv → gjør ingenting
           } else {
-            // curse: typisk increase/double/half – skip brukes når spilleren skal miste tur, ikke her
             let usedEffect = false;
 
             for (const passive of card.passive) {
@@ -520,20 +490,12 @@ export class RoundComponent implements OnInit, OnDestroy {
                   usedEffect = true;
                   break;
 
-                // ikke brukt i denne fasen:
-                case 'none':
-                case 'random':
-                case 'reduce':
-                case 'reflect':
-                case 'shield':
-                case 'skip':
                 default:
                   break;
               }
             }
 
             if (usedEffect) {
-              // Curse-kortet er brukt i denne drinking → logg effect-id for sletting
               this.markEffectUsedForCard(card, 'curse');
             }
           }
@@ -541,15 +503,10 @@ export class RoundComponent implements OnInit, OnDestroy {
         }
 
         case 'defence': {
-          if (!baseSet) {
-            // Ingen base-verdi å forsvare mot
-            break;
-          }
+          if (!baseSet) break;
 
           if (!card.passive || card.passive.length === 0) {
-            // Ingen passiv → gjør ingenting
           } else {
-            // i teorien: shield, reduce, half, reflect
             let usedEffect = false;
 
             for (const passive of card.passive) {
@@ -570,24 +527,16 @@ export class RoundComponent implements OnInit, OnDestroy {
                   break;
 
                 case 'reflect':
-                  // TODO: senere – nå bare nuller vi target sin damage
                   total = 0;
                   usedEffect = true;
                   break;
 
-                // ikke brukt i denne fasen:
-                case 'none':
-                case 'skip':
-                case 'double':
-                case 'increase':
-                case 'random':
                 default:
                   break;
               }
             }
 
             if (usedEffect) {
-              // Defence-kortet er brukt i denne drinking → logg effect-id for sletting
               this.markEffectUsedForCard(card, 'defence');
             }
           }
@@ -601,15 +550,13 @@ export class RoundComponent implements OnInit, OnDestroy {
   }
 
   getEffect(card: Card): string {
-    // beholder type på engelsk – evt. uppercased hvis du vil ha mer “label”-preg
-    return card.type.toUpperCase(); // ATTACK / CURSE / DEFENCE
+    return card.type.toUpperCase();
   }
 
   getCardPassive(card: Card): string {
     if (!card.passive || !card.passive.length) {
       return 'none';
     }
-    // viser passives som "reduce, double, shield"
     return card.passive.join(', ');
   }
 
