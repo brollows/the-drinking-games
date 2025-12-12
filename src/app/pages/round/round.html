@@ -122,109 +122,63 @@
 ========================= -->
 <ng-template #waiting>
   <section class="view view-waiting">
-    <header class="view-header">
-      <h2>Venter på tur</h2>
+    <div class="view-scroll">
+      <header class="view-header">
+        <h2>Venter på tur</h2>
 
-      <ng-container *ngIf="lastPlayedCard; else noLastCard">
-        <ng-container *ngIf="lastPlayedCard.type === 'attack'; else nonAttackInfo">
-          <p class="subtitle">
-            <strong>{{ lastPlayedBy?.name }}</strong>
-            sendte et angrep til
-            <strong>{{ lastPlayedTarget?.name || 'en spiller' }}</strong>
-            🍻
-          </p>
+        <ng-container *ngIf="lastPlayedCard; else noLastCard">
+          <ng-container *ngIf="lastPlayedCard.type === 'attack'; else nonAttackInfo">
+            <ng-container *ngTemplateOutlet="pendingAttackBlock"></ng-container>
+          </ng-container>
 
-          <div class="waiting-attack-wrapper">
-            <button class="hand-card hand-card--single" [class.type-attack]="true" disabled>
-              <ng-container
-                *ngTemplateOutlet="cardFace; context: { $implicit: lastPlayedCard, mode: 'single' }"
-              ></ng-container>
-            </button>
-          </div>
-
-          <p class="attack-description" *ngIf="pendingAttackCard">
-            {{ pendingAttackCard.description }}
-          </p>
-
-          <div class="effect-sequence" *ngIf="attackSequenceCards.length && pendingAttackTarget">
-            <h3>Effekter i spill</h3>
-
-            <div class="effect-cards-row" *ngIf="attackSequenceCards.length > 1">
-              <button
-                *ngFor="let c of attackSequenceCards.slice(1)"
-                class="hand-card hand-card--single effect-card"
-                [class.type-attack]="c.type === 'attack'"
-                [class.type-defence]="c.type === 'defence'"
-                [class.type-curse]="c.type === 'curse'"
-                disabled
-              >
-                <ng-container
-                  *ngTemplateOutlet="cardFace; context: { $implicit: c, mode: 'single' }"
-                ></ng-container>
-              </button>
-            </div>
-
-            <p class="total-drinks" *ngIf="pendingAttackTarget && pendingAttackCard">
-              {{ pendingAttackTarget.name }} må drikke
-              {{ pendingAttackTotalDrinks ?? pendingAttackCard.drinkAmount }}
-              slurk{{
-                (pendingAttackTotalDrinks ?? pendingAttackCard.drinkAmount) === 1 ? '' : 'er'
-              }}.
+          <ng-template #nonAttackInfo>
+            <p class="subtitle">
+              <strong>{{ lastPlayedBy?.name }}</strong>
+              spilte et <strong>{{ getCardTypeUpper(lastPlayedCard) }}</strong
+              >-kort 🍻
             </p>
-
-            <p class="calc-details" *ngIf="pendingAttackCard">
-              {{ getAttackTotalBreakdown() }}
-            </p>
-          </div>
+          </ng-template>
         </ng-container>
 
-        <ng-template #nonAttackInfo>
-          <p class="subtitle">
-            <strong>{{ lastPlayedBy?.name }}</strong>
-            spilte et <strong>{{ getCardTypeUpper(lastPlayedCard) }}</strong
-            >-kort 🍻
+        <ng-template #noLastCard>
+          <p class="subtitle" *ngIf="currentTurnPlayer; else noCurrent">
+            Det er <strong>{{ currentTurnPlayer.name }}</strong> sin tur 🍻
           </p>
+
+          <ng-template #noCurrent>
+            <p class="subtitle">Venter på at neste spiller skal velges...</p>
+          </ng-template>
         </ng-template>
-      </ng-container>
+      </header>
 
-      <ng-template #noLastCard>
-        <p class="subtitle" *ngIf="currentTurnPlayer; else noCurrent">
-          Det er <strong>{{ currentTurnPlayer.name }}</strong> sin tur 🍻
-        </p>
+      <hr class="divider" />
 
-        <ng-template #noCurrent>
-          <p class="subtitle">Venter på at neste spiller skal velges...</p>
+      <section class="waiting-list-section">
+        <h3>Spillere i spillet</h3>
+
+        <div class="waiting-player-scroll" *ngIf="players.length; else noPlayers">
+          <ul class="waiting-player-list">
+            <li
+              *ngFor="let p of players"
+              class="waiting-player-row"
+              [class.is-current]="p.id === currentTurnPlayerId"
+            >
+              <div class="wp-main">
+                <span class="wp-name">{{ p.name }}</span>
+                <span class="wp-lives">{{ p.lives }} 🍻</span>
+              </div>
+
+              <div class="wp-meta" *ngIf="p.id === currentTurnPlayerId">Spiller nå</div>
+              <div class="wp-meta" *ngIf="p.id !== currentTurnPlayerId">Venter på tur</div>
+            </li>
+          </ul>
+        </div>
+
+        <ng-template #noPlayers>
+          <p>Ingen spillere registrert i denne sessionen 🤔</p>
         </ng-template>
-      </ng-template>
-    </header>
-
-    <hr class="divider" />
-
-    <section class="waiting-list-section">
-      <h3>Spillere i spillet</h3>
-
-      <div class="waiting-player-scroll" *ngIf="players.length; else noPlayers">
-        <ul class="waiting-player-list">
-          <li
-            *ngFor="let p of players"
-            class="waiting-player-row"
-            [class.is-current]="p.id === currentTurnPlayerId"
-          >
-            <div class="wp-main">
-              <span class="wp-name">{{ p.name }}</span>
-              <span class="wp-lives">{{ p.lives }} 🍻</span>
-            </div>
-
-            <div class="wp-meta" *ngIf="p.id === currentTurnPlayerId">Spiller nå</div>
-            <div class="wp-meta" *ngIf="p.id !== currentTurnPlayerId">Venter på tur</div>
-          </li>
-        </ul>
-      </div>
-
-      <ng-template #noPlayers>
-        <p>Ingen spillere registrert i denne sessionen 🤔</p>
-      </ng-template>
-    </section>
+      </section>
+    </div>
   </section>
 </ng-template>
 
@@ -235,62 +189,23 @@
   <section class="view view-drinking">
     <div class="view-scroll">
       <header class="view-header">
-        <p class="subtitle">
-          <strong>{{ lastPlayedBy?.name }}</strong>
-          sendte dette kortet til deg:
-        </p>
+        <h2>Du skal drikke</h2>
       </header>
 
-      <div class="waiting-attack-wrapper" *ngIf="pendingAttackCard">
-        <button
-          class="hand-card hand-card--single"
-          [class.type-attack]="pendingAttackCard.type === 'attack'"
-          [class.type-defence]="pendingAttackCard.type === 'defence'"
-          [class.type-curse]="pendingAttackCard.type === 'curse'"
-          disabled
-        >
-          <ng-container
-            *ngTemplateOutlet="cardFace; context: { $implicit: pendingAttackCard, mode: 'single' }"
-          ></ng-container>
-        </button>
-      </div>
+      <ng-container *ngTemplateOutlet="pendingAttackBlock"></ng-container>
 
-      <p class="attack-description" *ngIf="pendingAttackCard">
-        {{ pendingAttackCard.description }}
-      </p>
-
-      <div class="effect-sequence" *ngIf="attackSequenceCards.length > 1">
-        <h3>Effekter i spill</h3>
-
-        <div class="effect-cards-row">
-          <button
-            *ngFor="let c of attackSequenceCards.slice(1)"
-            class="hand-card hand-card--single effect-card"
-            [class.type-attack]="c.type === 'attack'"
-            [class.type-defence]="c.type === 'defence'"
-            [class.type-curse]="c.type === 'curse'"
-            disabled
-          >
-            <ng-container
-              *ngTemplateOutlet="cardFace; context: { $implicit: c, mode: 'single' }"
-            ></ng-container>
-          </button>
-        </div>
-      </div>
-
-      <div class="card-details waiting-card-details" *ngIf="pendingAttackCard">
-        <p class="card-meta" [ngClass]="'card-type-' + pendingAttackCard.type">
-          Du må drikke {{ pendingAttackTotalDrinks ?? pendingAttackCard.drinkAmount }} slurker.
-        </p>
-
-        <p class="calc-details">
-          {{ getAttackTotalBreakdown() }}
-        </p>
-      </div>
-
-      <button class="btn primary" (click)="onConfirmDrank()" style="margin-top: 1.5rem">
+      <button
+        class="btn primary"
+        (click)="onConfirmDrank()"
+        [disabled]="!canConfirmDrank"
+        style="margin-top: 1.5rem"
+      >
         Jeg har drukket 🍻
       </button>
+
+      <p class="confirm-hint" *ngIf="!canConfirmDrank && expectedEffectCount > 0">
+        Venter på effekter... ({{ effectRevealCount }}/{{ expectedEffectCount }})
+      </p>
     </div>
   </section>
 </ng-template>
@@ -314,8 +229,6 @@
 
 <!-- =========================
       CARD TEMPLATE (re-used everywhere)
-      - $implicit = card
-      - mode = 'hand' | 'single'
 ========================= -->
 <ng-template #cardFace let-card let-mode="mode">
   <div class="card-img">
@@ -331,4 +244,76 @@
     <div class="card-title" [ngClass]="getTitleSizeClass(card.title)">{{ card.title }}</div>
     <div class="card-type">{{ getCardTypeUpper(card) }}</div>
   </div>
+</ng-template>
+
+<!-- =========================
+      PENDING ATTACK TEMPLATE (shared)
+========================= -->
+<ng-template #pendingAttackBlock>
+  <p class="subtitle" *ngIf="lastPlayedBy && pendingAttackCard">
+    <strong>{{ lastPlayedBy.name }}</strong>
+    sendte dette kortet til
+    <strong>{{ pendingAttackTarget?.name || 'en spiller' }}</strong> 🍻
+  </p>
+
+  <div class="waiting-attack-wrapper" *ngIf="pendingAttackCard">
+    <button
+      class="hand-card hand-card--single"
+      [class.type-attack]="pendingAttackCard.type === 'attack'"
+      [class.type-defence]="pendingAttackCard.type === 'defence'"
+      [class.type-curse]="pendingAttackCard.type === 'curse'"
+      disabled
+    >
+      <ng-container
+        *ngTemplateOutlet="cardFace; context: { $implicit: pendingAttackCard, mode: 'single' }"
+      ></ng-container>
+    </button>
+  </div>
+
+  <p class="attack-description" *ngIf="pendingAttackCard">
+    {{ pendingAttackCard.description }}
+  </p>
+
+  <div class="effect-sequence" *ngIf="attackSequenceCards.length > 1">
+    <h3>Effekter i spill</h3>
+
+    <!-- ✅ Progress dots -->
+    <div class="effect-dots" *ngIf="expectedEffectCount > 0">
+      <span
+        *ngFor="let _ of effectDotArray; let i = index"
+        class="dot"
+        [class.filled]="i < effectRevealCount"
+      ></span>
+    </div>
+
+    <!-- ✅ Stacked “pile” instead of side-by-side -->
+    <div class="effect-stack">
+      <ng-container *ngFor="let c of allEffectCards; let i = index">
+        <button
+          class="hand-card hand-card--single effect-card-stacked"
+          [class.type-attack]="c.type === 'attack'"
+          [class.type-defence]="c.type === 'defence'"
+          [class.type-curse]="c.type === 'curse'"
+          [class.is-revealed]="i < effectRevealCount"
+          [style.--rot]="getEffectRotation(i)"
+          [style.--from]="getEffectFrom(i)"
+          [style.zIndex]="100 + i"
+          disabled
+        >
+          <ng-container *ngTemplateOutlet="cardFace; context: { $implicit: c, mode: 'single' }">
+          </ng-container>
+        </button>
+      </ng-container>
+    </div>
+  </div>
+
+  <p class="total-drinks" *ngIf="pendingAttackCard && pendingAttackTarget">
+    {{ pendingAttackTarget.name }} må drikke
+    {{ displayPendingTotal }}
+    slurk{{ displayPendingTotal === 1 ? '' : 'er' }}.
+  </p>
+
+  <p class="calc-details" *ngIf="pendingAttackCard">
+    {{ getAttackTotalBreakdownAnimated() }}
+  </p>
 </ng-template>

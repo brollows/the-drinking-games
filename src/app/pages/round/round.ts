@@ -10,6 +10,8 @@ import {
 import { CardService } from '../../cards/card.service';
 import { Card } from '../../cards/card';
 
+type AttackAnimState = 'idle' | 'running' | 'done';
+
 @Component({
   selector: 'app-round',
   standalone: true,
@@ -48,8 +50,23 @@ export class RoundComponent implements OnInit, OnDestroy {
 
   usedEffectIds: string[] = [];
 
+  effectRevealCount = 0; // hvor mange effect-kort som er synlige
+  displayPendingTotal = 0; // total som vises nå (oppdateres per steg)
+  private stepTotals: number[] = []; // total per steg (index matcher attackSequenceCards)
+
+  private attackAnimTimer: any = null;
+  private currentAttackKey: string | null = null;
+
   private me: Player | null = null;
   private pollingInterval: any = null;
+
+  // ✅ new: progress + random “pile”
+  expectedEffectCount = 0;
+  effectDotArray: null[] = [];
+  private effectRotations: string[] = [];
+  private effectFrom: string[] = [];
+
+  private animState: AttackAnimState = 'idle';
 
   constructor(
     private route: ActivatedRoute,
@@ -86,9 +103,8 @@ export class RoundComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-    }
+    if (this.pollingInterval) clearInterval(this.pollingInterval);
+    this.stopAttackAnimation();
   }
 
   private async refreshState() {
@@ -130,6 +146,9 @@ export class RoundComponent implements OnInit, OnDestroy {
       if (this.viewState !== 'lost' && this.viewState !== 'finished') {
         this.updateViewStateFromRoundState();
       }
+
+      // ✅ start animasjon etter viewState
+      this.startAttackAnimationIfNeeded();
 
       try {
         this.cdr.detectChanges();
@@ -191,8 +210,6 @@ export class RoundComponent implements OnInit, OnDestroy {
     }
   }
 
-  // 🔁 Helper: bygg hånd slik at vi ALLTID har 1 av hver type i rekkefølge:
-  // [DEFENCE, CURSE, ATTACK]
   private buildHandWithOneOfEach(remaining: Card[] = []) {
     const types: Array<Card['type']> = ['defence', 'curse', 'attack'];
     const newHand: Card[] = [];
@@ -207,12 +224,10 @@ export class RoundComponent implements OnInit, OnDestroy {
     }
 
     this.hand = newHand;
-    // default-markér siste (attack)
     this.selectedIndex = this.hand.length > 0 ? this.hand.length - 1 : null;
     console.log('Ny hånd (1 av hver type):', this.hand);
   }
 
-  // 🃏 Første gang vi deler ut
   private dealInitialHand() {
     this.buildHandWithOneOfEach();
   }
@@ -244,16 +259,13 @@ export class RoundComponent implements OnInit, OnDestroy {
     const me = this.me;
     const sessionId = this.sessionId;
 
-    if (!card || !me || !sessionId) {
-      return;
-    }
+    if (!card || !me || !sessionId) return;
 
     try {
       if (card.type === 'defence') {
         await this.gameSession.playDefenceCard(sessionId, me.id, card.id);
         await this.gameSession.advanceTurn(sessionId);
 
-        // 🃏 Etter spill: erstatt brukt kort, beholde 1 av hver type
         this.removePlayedCardAndDrawNew();
         return;
       }
@@ -277,18 +289,14 @@ export class RoundComponent implements OnInit, OnDestroy {
     }
   }
 
-  // 🃏 Ny logikk: behold 1 DEFENCE, 1 CURSE, 1 ATTACK – erstatt kun typen som ble spilt
   private removePlayedCardAndDrawNew() {
     if (this.selectedIndex != null) {
       const remaining = this.hand.filter((_, i) => i !== this.selectedIndex);
-      // Bygg opp hånda på nytt med 1 av hver type
       this.buildHandWithOneOfEach(remaining);
     } else {
-      // fallback – sørg for at hånda fortsatt er "1 av hver"
       this.buildHandWithOneOfEach(this.hand);
     }
 
-    // reset target-state
     this.selectingTarget = false;
     this.targetCandidates = [];
     this.pendingCardToPlay = null;
@@ -301,9 +309,11 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     if (!me || !sessionId) return;
 
+    // ✅ hard stop: ikke tillat før animasjonen er ferdig
+    if (!this.canConfirmDrank) return;
+
     try {
       const total = this.pendingAttackTotalDrinks ?? this.pendingAttackCard?.drinkAmount ?? 0;
-
       const effectIdsToDelete = [...this.usedEffectIds];
 
       await this.gameSession.resolveAttackClientSide(sessionId, me.id, total, effectIdsToDelete);
@@ -324,20 +334,16 @@ export class RoundComponent implements OnInit, OnDestroy {
     const card = this.pendingCardToPlay;
     const targetId = this.selectedTargetId;
 
-    if (!sessionId || !me || !card || !targetId) {
-      return;
-    }
+    if (!sessionId || !me || !card || !targetId) return;
 
     try {
       if (card.type === 'attack') {
         await this.gameSession.playAttackCard(sessionId, me.id, targetId, card.id);
-        // turn flyttes når target trykker "Jeg har drukket"
       } else if (card.type === 'curse') {
         await this.gameSession.playCurseCard(sessionId, me.id, targetId, card.id);
         await this.gameSession.advanceTurn(sessionId);
       }
 
-      // Erstatt brukt kort, behold 1 av hver type
       this.removePlayedCardAndDrawNew();
     } catch (e) {
       console.error('Feil ved bekreftelse av target:', e);
@@ -380,6 +386,19 @@ export class RoundComponent implements OnInit, OnDestroy {
       this.attackSequenceCards = [];
       this.pendingAttackTotalDrinks = null;
       this.pendingAttackTarget = null;
+
+      // reset anim state
+      this.animState = 'idle';
+      this.currentAttackKey = null;
+      this.effectRevealCount = 0;
+      this.displayPendingTotal = 0;
+      this.stepTotals = [];
+      this.expectedEffectCount = 0;
+      this.effectDotArray = [];
+      this.effectRotations = [];
+      this.effectFrom = [];
+      this.stopAttackAnimation();
+
       return;
     }
 
@@ -418,50 +437,48 @@ export class RoundComponent implements OnInit, OnDestroy {
       .map((e) => this.cards.getCardById(e.cardId))
       .filter((c): c is Card => !!c);
 
-    this.attackSequenceCards = [this.pendingAttackCard, ...curseCards, ...defenceCards];
+    const cursePriority: Record<string, number> = { increase: 0, double: 1 };
+    const defencePriority: Record<string, number> = { reflect: 0, shield: 1, reduce: 2, half: 3 };
 
+    const getPriority = (card: Card, map: Record<string, number>) => {
+      const passives = card.passive ?? [];
+      let best = Number.POSITIVE_INFINITY;
+
+      for (const p of passives) {
+        if (map[p] !== undefined) {
+          best = Math.min(best, map[p]);
+        }
+      }
+      return best;
+    };
+
+    const sortedCurse = [...curseCards].sort(
+      (a, b) => getPriority(a, cursePriority) - getPriority(b, cursePriority)
+    );
+
+    const sortedDefence = [...defenceCards].sort(
+      (a, b) => getPriority(a, defencePriority) - getPriority(b, defencePriority)
+    );
+
+    this.attackSequenceCards = [this.pendingAttackCard, ...sortedCurse, ...sortedDefence];
+
+    // ---------------- EFFECT RESOLUTION ----------------
     let total = 0;
     let baseSet = false;
     let skipRemainingEffects = false;
 
     for (const card of this.attackSequenceCards) {
-      if (skipRemainingEffects && card.type !== 'attack') {
-        continue;
-      }
+      if (skipRemainingEffects && card.type !== 'attack') continue;
+      if (baseSet && total === 0) break;
 
       switch (card.type) {
         case 'attack': {
-          let localBaseSet = false;
+          const passives = card.passive ?? [];
+          total = card.drinkAmount;
+          baseSet = true;
 
-          if (!card.passive || card.passive.length === 0) {
-            total = card.drinkAmount;
-            baseSet = true;
-            localBaseSet = true;
-          } else {
-            for (const passive of card.passive) {
-              switch (passive) {
-                case 'none':
-                  total = card.drinkAmount;
-                  baseSet = true;
-                  localBaseSet = true;
-                  break;
-
-                case 'random':
-                  total = card.drinkAmount;
-                  baseSet = true;
-                  localBaseSet = true;
-                  skipRemainingEffects = true;
-                  break;
-
-                default:
-                  break;
-              }
-            }
-
-            if (!localBaseSet) {
-              total = card.drinkAmount;
-              baseSet = true;
-            }
+          if (passives.includes('random')) {
+            skipRemainingEffects = true;
           }
           break;
         }
@@ -469,119 +486,64 @@ export class RoundComponent implements OnInit, OnDestroy {
         case 'curse': {
           if (!baseSet) break;
 
-          if (!card.passive || card.passive.length === 0) {
-          } else {
-            let usedEffect = false;
+          let used = false;
 
-            for (const passive of card.passive) {
-              switch (passive) {
-                case 'increase':
-                  total += card.drinkAmount;
-                  usedEffect = true;
-                  break;
-
-                case 'double':
-                  total *= 2;
-                  usedEffect = true;
-                  break;
-
-                case 'half':
-                  total = Math.ceil(total / 2);
-                  usedEffect = true;
-                  break;
-
-                default:
-                  break;
-              }
+          for (const passive of card.passive ?? []) {
+            if (passive === 'increase') {
+              total += card.drinkAmount;
+              used = true;
             }
-
-            if (usedEffect) {
-              this.markEffectUsedForCard(card, 'curse');
+            if (passive === 'double') {
+              total *= 2;
+              used = true;
             }
+            if (total === 0) break;
           }
+
+          if (used) this.markEffectUsedForCard(card, 'curse');
           break;
         }
 
         case 'defence': {
           if (!baseSet) break;
 
-          if (!card.passive || card.passive.length === 0) {
-          } else {
-            let usedEffect = false;
+          let used = false;
+          let reflectTriggered = false;
 
-            for (const passive of card.passive) {
-              switch (passive) {
-                case 'shield':
-                  total = 0;
-                  usedEffect = true;
-                  break;
-
-                case 'reduce':
-                  total = Math.max(0, total - card.drinkAmount);
-                  usedEffect = true;
-                  break;
-
-                case 'half':
-                  total = Math.ceil(total / 2);
-                  usedEffect = true;
-                  break;
-
-                case 'reflect':
-                  total = 0;
-                  usedEffect = true;
-                  break;
-
-                default:
-                  break;
-              }
+          for (const passive of card.passive ?? []) {
+            if (passive === 'reflect') {
+              total = 0;
+              used = true;
+              reflectTriggered = true;
             }
-
-            if (usedEffect) {
-              this.markEffectUsedForCard(card, 'defence');
+            if (passive === 'shield') {
+              total = 0;
+              used = true;
             }
+            if (passive === 'reduce') {
+              total = Math.max(0, total - card.drinkAmount);
+              used = true;
+            }
+            if (passive === 'half') {
+              total = Math.ceil(total / 2);
+              used = true;
+            }
+            if (reflectTriggered || total === 0) break;
           }
+
+          if (used) this.markEffectUsedForCard(card, 'defence');
           break;
         }
       }
     }
 
-    if (total < 0) total = 0;
-    this.pendingAttackTotalDrinks = total;
-  }
-
-  getEffect(card: Card): string {
-    return card.type.toUpperCase();
-  }
-
-  getCardPassive(card: Card): string {
-    if (!card.passive || !card.passive.length) {
-      return 'none';
-    }
-    return card.passive.join(', ');
-  }
-
-  getAttackTotalBreakdown(): string {
-    if (!this.pendingAttackCard) {
-      return '';
-    }
-
-    const base = this.pendingAttackCard.drinkAmount;
-    const total = this.pendingAttackTotalDrinks ?? base;
-
-    const baseStr = `${base} slurk${base === 1 ? '' : 'er'}`;
-    const totalStr = `${total} slurk${total === 1 ? '' : 'er'}`;
-
-    if (total === base) {
-      return `Base: ${baseStr} (ingen effekter endret antallet).`;
-    }
-
-    return `Base: ${baseStr} → Totalt: ${totalStr} etter curse/defence-effekter.`;
+    this.pendingAttackTotalDrinks = Math.max(0, total);
   }
 
   private readonly cardImgBase = '/assets/cards';
 
   getCardImageSrc(card: any): string {
-    return `${this.cardImgBase}/${card.id}.png`; // senere
+    return `${this.cardImgBase}/${card.id}.png`;
   }
 
   onCardImgError(ev: Event) {
@@ -594,22 +556,209 @@ export class RoundComponent implements OnInit, OnDestroy {
     if (!title) return 'title-normal';
 
     const t = title.trim();
-
-    // ord = sekvenser uten mellomrom (så "Skolegangster" blir ett ord)
     const words = t.split(/\s+/).filter(Boolean);
-
     const longestWordLen = words.length ? Math.max(...words.map((w) => w.length)) : 0;
-
-    // total lengde inkl. symboler/punktum osv (men uten mellomrom)
     const totalNoSpaces = t.replace(/\s+/g, '').length;
 
-    // Regler:
-    // - veldig lange enkeltord (>= 14) => XS
-    // - lange enkeltord (>= 11) => SM
-    // - eller: veldig lang tittel totalt => SM/XS
     if (longestWordLen >= 14 || totalNoSpaces >= 28) return 'title-xs';
     if (longestWordLen >= 11 || totalNoSpaces >= 20) return 'title-sm';
 
     return 'title-normal';
+  }
+
+  // ✅ use all effects, not slice (so we can stack + animate)
+  get allEffectCards(): Card[] {
+    return this.attackSequenceCards.slice(1);
+  }
+
+  // ✅ button gating
+  get canConfirmDrank(): boolean {
+    if (this.viewState !== 'drinking') return true;
+    if (this.expectedEffectCount <= 0) return true; // ingen effekter, lov å trykke med en gang
+    return this.animState === 'done';
+  }
+
+  private stopAttackAnimation() {
+    if (this.attackAnimTimer) {
+      clearTimeout(this.attackAnimTimer);
+      this.attackAnimTimer = null;
+    }
+  }
+
+  private buildAttackKey(rs: RoundState, effects: PlayerEffect[]): string {
+    const effectIds = effects
+      .map((e) => e.id)
+      .sort()
+      .join(',');
+    return `${rs.pendingAttackCardId}|${rs.pendingAttackToPlayerId}|${effectIds}`;
+  }
+
+  private computeStepTotals(sequence: Card[]): number[] {
+    let total = 0;
+    let baseSet = false;
+    let skipRemainingEffects = false;
+    const totals: number[] = [];
+
+    for (const card of sequence) {
+      if (skipRemainingEffects && card.type !== 'attack') {
+        totals.push(total);
+        continue;
+      }
+
+      if (baseSet && total === 0) {
+        totals.push(0);
+        continue;
+      }
+
+      switch (card.type) {
+        case 'attack': {
+          const passives = card.passive ?? [];
+          total = card.drinkAmount;
+          baseSet = true;
+
+          if (passives.includes('random')) {
+            skipRemainingEffects = true;
+          }
+          break;
+        }
+
+        case 'curse': {
+          if (!baseSet) break;
+          for (const p of card.passive ?? []) {
+            if (p === 'increase') total += card.drinkAmount;
+            if (p === 'double') total *= 2;
+            if (total === 0) break;
+          }
+          break;
+        }
+
+        case 'defence': {
+          if (!baseSet) break;
+          let reflect = false;
+
+          for (const p of card.passive ?? []) {
+            if (p === 'reflect') {
+              total = 0;
+              reflect = true;
+            }
+            if (p === 'shield') total = 0;
+            if (p === 'reduce') total = Math.max(0, total - card.drinkAmount);
+            if (p === 'half') total = Math.ceil(total / 2);
+            if (reflect || total === 0) break;
+          }
+          break;
+        }
+      }
+
+      totals.push(Math.max(0, total));
+    }
+
+    return totals;
+  }
+
+  private initEffectVisuals(effectsCount: number) {
+    this.expectedEffectCount = effectsCount;
+    this.effectDotArray = Array.from({ length: effectsCount }, () => null);
+
+    // random rotasjon + side per effect
+    this.effectRotations = [];
+    this.effectFrom = [];
+
+    for (let i = 0; i < effectsCount; i++) {
+      const rot = Math.floor(Math.random() * 51) - 25; // -25..25
+      this.effectRotations.push(`${rot}deg`);
+
+      const from = Math.random() < 0.5 ? '-160px' : '160px';
+      this.effectFrom.push(from);
+    }
+  }
+
+  getEffectRotation(i: number): string {
+    return this.effectRotations[i] ?? '0deg';
+  }
+
+  getEffectFrom(i: number): string {
+    return this.effectFrom[i] ?? '160px';
+  }
+
+  private startAttackAnimationIfNeeded() {
+    const rs = this.roundState;
+
+    if (!rs || !rs.pendingAttack) {
+      this.stopAttackAnimation();
+      this.currentAttackKey = null;
+      this.animState = 'idle';
+      this.effectRevealCount = 0;
+      this.displayPendingTotal = 0;
+      this.stepTotals = [];
+      this.expectedEffectCount = 0;
+      this.effectDotArray = [];
+      this.effectRotations = [];
+      this.effectFrom = [];
+      return;
+    }
+
+    const key = this.buildAttackKey(rs, this.pendingAttackEffects);
+
+    // ✅ viktig: IKKE restart hvis samme key (selv om timer==null)
+    if (this.currentAttackKey === key) {
+      return;
+    }
+
+    // ny attack/effect-sett -> reset og start
+    this.currentAttackKey = key;
+    this.stopAttackAnimation();
+
+    this.animState = 'running';
+
+    this.stepTotals = this.computeStepTotals(this.attackSequenceCards);
+
+    const base = this.pendingAttackCard?.drinkAmount ?? 0;
+
+    const effectsCount = Math.max(0, this.attackSequenceCards.length - 1);
+    this.initEffectVisuals(effectsCount);
+
+    // start: 0 effects synlig, total = base (stepTotals[0])
+    this.effectRevealCount = 0;
+    this.displayPendingTotal = this.stepTotals.length ? this.stepTotals[0] : base;
+
+    // ingen effekter -> ferdig med en gang
+    if (effectsCount <= 0) {
+      this.animState = 'done';
+      return;
+    }
+
+    const tick = () => {
+      this.effectRevealCount = Math.min(effectsCount, this.effectRevealCount + 1);
+
+      // total etter "attack + N effects" ligger på index = N (attack er index 0)
+      const idx = Math.min(this.effectRevealCount, this.stepTotals.length - 1);
+      this.displayPendingTotal = this.stepTotals[idx] ?? this.displayPendingTotal;
+
+      // ferdig?
+      if (this.effectRevealCount >= effectsCount || this.displayPendingTotal === 0) {
+        this.attackAnimTimer = null;
+        this.animState = 'done';
+        return;
+      }
+
+      this.attackAnimTimer = setTimeout(tick, 5000);
+    };
+
+    // ✅ behold 5 sek før første effect
+    this.attackAnimTimer = setTimeout(tick, 5000);
+  }
+
+  getAttackTotalBreakdownAnimated(): string {
+    if (!this.pendingAttackCard) return '';
+
+    const base = this.pendingAttackCard.drinkAmount;
+    const total = this.displayPendingTotal || base;
+
+    const baseStr = `${base} slurk${base === 1 ? '' : 'er'}`;
+    const totalStr = `${total} slurk${total === 1 ? '' : 'er'}`;
+
+    if (total === base) return `Base: ${baseStr}.`;
+    return `Base: ${baseStr} → Nå: ${totalStr}.`;
   }
 }

@@ -121,8 +121,8 @@
    FIX: Ikke klipp kortene i playing (pga overflow)
    ========================================================= */
 .view-playing .view-scroll {
-  overflow-x: visible; /* viktig: lar roterte kort stikke ut sidelengs/opp */
-  overflow-y: auto; /* behold scroll som før */
+  overflow-x: visible;
+  overflow-y: auto;
 }
 
 .view-playing .card-hand::before {
@@ -145,7 +145,6 @@
   padding: 0 1rem;
   box-sizing: border-box;
 
-  /* 🔧 ny: sørg for at hånden ligger "foran" og ikke klippes visuelt */
   position: relative;
   z-index: 5;
 }
@@ -178,8 +177,6 @@
   display: flex;
   flex-direction: column;
   color: #fff;
-
-  /* 🔑 IKKE gap her, vi håndterer spacing inni card-info */
 }
 
 .hand-card:first-child {
@@ -208,7 +205,6 @@
   min-height: 0;
 }
 
-/* 60% image */
 .card-image {
   width: 100%;
   height: 100%;
@@ -242,7 +238,6 @@
   overflow-wrap: normal;
   hyphens: none;
 
-  /* litt luft, men ikke for mye */
   margin-top: 2px;
 }
 
@@ -268,7 +263,6 @@
   letter-spacing: 0.08em;
   opacity: 0.9;
 
-  /* 🔑 sørger for at det aldri krymper bort */
   flex: 0 0 auto;
 }
 
@@ -320,7 +314,7 @@
 .card-details {
   width: 100%;
   max-width: 420px;
-  margin: 1rem auto 0;
+  margin: 2rem auto 0;
 
   text-align: left;
   box-sizing: border-box;
@@ -338,6 +332,7 @@
   margin: 0;
   font-size: 0.9rem;
   opacity: 0.85;
+  min-height: 7rem;
 }
 
 .card-meta {
@@ -349,6 +344,7 @@
   border: none;
   padding: 0.25rem 0;
   transition: text-shadow 0.2s ease;
+  text-align: center;
 }
 
 .card-meta.card-type-attack {
@@ -380,23 +376,68 @@
   text-align: center;
 }
 
-.effect-cards-row {
-  width: 100%;
-  margin-top: 1.25rem;
+.effect-sequence h3 {
+  margin: 1.25rem 0 0.25rem;
+  text-align: center;
+  font-size: 0.95rem;
+  opacity: 0.9;
+}
+
+/* ✅ dots */
+.effect-dots {
+  margin: 0.6rem 0 0.3rem;
   display: flex;
   justify-content: center;
-  align-items: flex-end;
-  padding: 0 1rem;
-  box-sizing: border-box;
+  gap: 0.5rem;
 }
 
-.effect-card {
-  margin-left: -20px;
-}
-.effect-card:first-child {
-  margin-left: 0;
+.effect-dots .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  background: transparent;
+  opacity: 0.95;
+  transition: background 0.2s ease, transform 0.2s ease;
 }
 
+.effect-dots .dot.filled {
+  background: rgba(255, 255, 255, 0.95);
+  transform: scale(1.05);
+}
+
+/* ✅ stacked pile container */
+.effect-stack {
+  position: relative;
+  height: 190px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 0.6rem;
+}
+
+/* stacked card behavior */
+.effect-card-stacked {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin-left: 0 !important;
+
+  transform: translate(-50%, -50%) translateX(var(--from, 160px)) rotate(var(--rot, 0deg))
+    scale(0.98);
+  opacity: 0;
+  filter: blur(0px);
+
+  transition: transform 0.55s cubic-bezier(0.2, 0.9, 0.2, 1), opacity 0.35s ease;
+}
+
+/* revealed -> lands in the pile */
+.effect-card-stacked.is-revealed {
+  opacity: 1;
+  transform: translate(-50%, -50%) translateX(0px) rotate(var(--rot, 0deg)) scale(1);
+}
+
+/* totals */
 .total-drinks {
   margin-top: 0.75rem;
   text-align: center;
@@ -408,6 +449,14 @@
   font-size: 0.85rem;
   opacity: 0.8;
   text-align: center;
+}
+
+/* hint under disabled confirm */
+.confirm-hint {
+  margin-top: 0.5rem;
+  text-align: center;
+  font-size: 0.85rem;
+  opacity: 0.8;
 }
 
 /* =========================================================
