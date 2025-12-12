@@ -10,6 +10,73 @@
     <div class="player-lives">{{ currentLives }} <span class="bigger-emoji">🍻</span></div>
   </div>
 
+  <!-- ✅ RANDOM OVERLAY (tivolihjul) -->
+  <div
+    class="random-overlay"
+    *ngIf="randomOverlayVisible"
+    [class.is-visible]="randomOverlayVisible && !randomOverlayHiding"
+    [class.is-hiding]="randomOverlayHiding"
+  >
+    <div class="random-overlay-inner">
+      <!-- card + countdown (alltid i starten) -->
+      <div class="random-card-block" *ngIf="pendingAttackCard">
+        <div class="random-card-title">🎡 Random-kort</div>
+
+        <div class="random-card-wrapper">
+          <button
+            class="hand-card hand-card--single"
+            [class.type-attack]="pendingAttackCard.type === 'attack'"
+            [class.type-defence]="pendingAttackCard.type === 'defence'"
+            [class.type-curse]="pendingAttackCard.type === 'curse'"
+            disabled
+          >
+            <ng-container
+              *ngTemplateOutlet="
+                cardFace;
+                context: { $implicit: pendingAttackCard, mode: 'single' }
+              "
+            ></ng-container>
+          </button>
+        </div>
+
+        <div class="random-countdown" *ngIf="randomPhase === 'countdown'">
+          Starter om <strong>{{ randomCountdown }}</strong
+          >…
+        </div>
+      </div>
+
+      <!-- wheel -->
+      <div class="wheel-shell" [class.is-shown]="randomPhase !== 'idle'">
+        <div class="wheel-title" *ngIf="randomPhase === 'countdown'">Hjulet fader inn…</div>
+        <div class="wheel-title" *ngIf="randomPhase === 'spinning'">Spinning… 🎠</div>
+        <div class="wheel-title" *ngIf="randomPhase === 'done' && randomWheelWinner">
+          Landet på <strong>{{ randomWheelWinner.name }}</strong> 🍻
+        </div>
+
+        <div class="wheel-window">
+          <div class="wheel-marker"></div>
+
+          <div class="wheel-reel">
+            <div
+              class="wheel-strip-vertical"
+              [class.is-spinning]="randomPhase === 'spinning'"
+              [style.transform]="wheelTransform"
+              [style.transition]="wheelTransition"
+            >
+              <div class="wheel-item-vertical" *ngFor="let p of wheelReelItems">
+                {{ p.name }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wheel-hint" *ngIf="randomPhase === 'countdown'">
+          (Felles winner for alle skjermer)
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- PLAYING -->
   <ng-container *ngIf="viewState === 'playing'">
     <ng-container *ngTemplateOutlet="playing"></ng-container>
@@ -76,12 +143,20 @@
           {{ selectedCard.passive.join(', ') }}
         </p>
 
-        <button class="btn primary" *ngIf="!selectingTarget" (click)="onPlaySelectedCard()">
+        <button
+          class="btn primary"
+          *ngIf="!selectingTarget"
+          (click)="onPlaySelectedCard()"
+          [disabled]="isBtnLocked('playSelected')"
+        >
           Spill dette kortet
         </button>
 
-        <!-- TARGET-SELECTION -->
-        <div class="target-select" *ngIf="selectingTarget && pendingCardToPlay">
+        <!-- ✅ TARGET-SELECTION (skal IKKE vises når selected card er random) -->
+        <div
+          class="target-select"
+          *ngIf="selectingTarget && pendingCardToPlay && !isRandomSelected"
+        >
           <h3 class="target-title">Velg hvem som skal få kortet</h3>
 
           <ul class="target-list">
@@ -99,19 +174,33 @@
           </ul>
 
           <div class="target-actions">
-            <button class="btn secondary" type="button" (click)="onCancelTargetSelection()">
+            <button
+              class="btn secondary"
+              type="button"
+              (click)="onCancelTargetSelection()"
+              [disabled]="isBtnLocked('cancelTarget')"
+            >
               Avbryt
             </button>
             <button
               class="btn primary"
               type="button"
               (click)="onConfirmTargetSelection()"
-              [disabled]="!selectedTargetId"
+              [disabled]="isBtnLocked('confirmTarget') || !selectedTargetId"
             >
               Bekreft mål
             </button>
           </div>
         </div>
+
+        <!-- ✅ hint når random er valgt -->
+        <p
+          class="subtitle"
+          *ngIf="isRandomSelected"
+          style="margin-top: 0.75rem; text-align: center"
+        >
+          Random-kort velger mål selv 🎡
+        </p>
       </div>
     </div>
   </section>
@@ -202,7 +291,7 @@
       <button
         class="btn primary"
         (click)="onConfirmDrank()"
-        [disabled]="!canConfirmDrank"
+        [disabled]="isBtnLocked('confirmDrank') || !canConfirmDrank"
         style="margin-top: 1.5rem"
       >
         Jeg har drukket 🍻
@@ -282,7 +371,6 @@
   <div class="effect-sequence" *ngIf="allEffectCards.length > 0">
     <h3>Effekter i spill</h3>
 
-    <!-- ✅ Progress dots -->
     <div class="effect-dots" *ngIf="expectedEffectCount > 0">
       <span
         *ngFor="let _ of effectDotArray; let i = index"
@@ -291,7 +379,6 @@
       ></span>
     </div>
 
-    <!-- ✅ Stacked “pile” instead of side-by-side -->
     <div class="effect-stack">
       <ng-container *ngFor="let c of allEffectCards; let i = index">
         <button

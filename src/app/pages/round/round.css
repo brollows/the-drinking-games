@@ -200,6 +200,13 @@
   cursor: default;
 }
 
+/* ✅ disabled visuals */
+button:disabled {
+  opacity: 0.72;
+  cursor: not-allowed !important;
+  pointer-events: none;
+}
+
 .card-img {
   flex: 0 0 56%;
   min-height: 0;
@@ -615,16 +622,142 @@
   gap: 0.5rem;
 }
 
-.effect-card-stacked.is-revealed {
-  transform: translate(-50%, calc(-50% + (var(--lift, 0) * -1px))) translateX(0px)
-    rotate(var(--rot, 0deg)) scale(1);
+/* =========================================================
+   ✅ RANDOM OVERLAY (fullscreen tivoli wheel)
+   ========================================================= */
+.random-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(6px);
+
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s ease;
 }
 
-@keyframes pileThud {
-  0% {
-    transform: translate(-50%, -50%) translateX(0px) rotate(var(--rot, 0deg)) scale(1.06);
-  }
-  100% {
-    transform: translate(-50%, -50%) translateX(0px) rotate(var(--rot, 0deg)) scale(1);
-  }
+.random-overlay.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.random-overlay.is-hiding {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.random-overlay-inner {
+  width: min(560px, 92vw);
+  border-radius: 18px;
+  padding: 1.1rem 1.1rem 1.25rem;
+  background: rgba(10, 10, 10, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.65);
+}
+
+.random-card-title {
+  text-align: center;
+  font-weight: 900;
+  margin-bottom: 0.6rem;
+  opacity: 0.95;
+}
+
+.random-card-wrapper {
+  display: flex;
+  justify-content: center;
+}
+
+.random-countdown {
+  margin-top: 0.65rem;
+  text-align: center;
+  font-weight: 800;
+  opacity: 0.9;
+}
+
+.wheel-shell {
+  margin-top: 1rem;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.wheel-shell.is-shown {
+  opacity: 1;
+  transform: translateY(0px);
+}
+
+.wheel-title {
+  text-align: center;
+  font-weight: 900;
+  margin-bottom: 0.65rem;
+  opacity: 0.95;
+}
+
+.wheel-window {
+  position: relative;
+  height: 160px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.wheel-marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 3px;
+  transform: translateY(-50%);
+  background: rgba(255, 215, 0, 0.95);
+  box-shadow: 0 0 18px rgba(255, 215, 0, 0.65);
+  z-index: 2;
+}
+
+.wheel-reel {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+
+  /* viktige: IKKE center – vi vil ha reel som starter “oppe” */
+  display: block;
+}
+
+.wheel-strip-vertical {
+  width: 100%;
+}
+
+.wheel-strip-vertical {
+  will-change: transform;
+}
+
+.wheel-item-vertical {
+  height: 42px; /* match WHEEL_ITEM_H i TS */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 0 14px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.55);
+}
+
+.wheel-item-vertical:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.wheel-hint {
+  margin-top: 0.6rem;
+  text-align: center;
+  font-size: 0.85rem;
+  opacity: 0.75;
 }
