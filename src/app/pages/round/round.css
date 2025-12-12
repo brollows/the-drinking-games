@@ -1,8 +1,53 @@
+/* =========================================================
+   Round Layout
+   ========================================================= */
 .round-wrapper {
   position: relative;
+  height: 100%;
+  min-height: 0;
+
+  display: flex;
+  flex-direction: column;
 }
 
-/* Liten liv-counter oppe til høyre */
+/* Fullscreen "din tur" ramme */
+.round-wrapper.is-my-turn::before {
+  content: '';
+  position: fixed;
+  inset: 6px;
+  pointer-events: none;
+  z-index: 999;
+  border-radius: 16px;
+
+  box-shadow:
+    /* 🌟 YTRE GLOW */ 0 0 14px rgba(255, 215, 0, 0.6), 0 0 32px rgba(255, 215, 0, 0.5),
+    0 0 70px rgba(255, 200, 0, 0.45), /* 🔥 INDRE GLOW */ inset 0 0 12px rgba(255, 215, 0, 0.35),
+    inset 0 0 26px rgba(255, 215, 0, 0.25);
+
+  animation: myTurnGlow 1.4s ease-in-out infinite;
+}
+
+@keyframes myTurnGlow {
+  0% {
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.45), 0 0 24px rgba(255, 215, 0, 0.35),
+      0 0 50px rgba(255, 200, 0, 0.3), inset 0 0 10px rgba(255, 215, 0, 0.25),
+      inset 0 0 18px rgba(255, 215, 0, 0.18);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.85), 0 0 44px rgba(255, 215, 0, 0.75),
+      0 0 90px rgba(255, 200, 0, 0.65), inset 0 0 18px rgba(255, 215, 0, 0.45),
+      inset 0 0 34px rgba(255, 215, 0, 0.35);
+  }
+  100% {
+    box-shadow: 0 0 10px rgba(255, 215, 0, 0.45), 0 0 24px rgba(255, 215, 0, 0.35),
+      0 0 50px rgba(255, 200, 0, 0.3), inset 0 0 10px rgba(255, 215, 0, 0.25),
+      inset 0 0 18px rgba(255, 215, 0, 0.18);
+  }
+}
+
+/* =========================================================
+   HUD
+   ========================================================= */
 .player-hud {
   position: absolute;
   top: 0.75rem;
@@ -22,7 +67,7 @@
 
 .player-lives {
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 700;
   color: #ffdddd;
   display: flex;
   align-items: center;
@@ -33,28 +78,66 @@
   font-size: 1.2rem;
 }
 
-.playing-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-
+/* =========================================================
+   View Shell
+   ========================================================= */
+.view {
+  height: 100%;
+  min-height: 0;
   width: 100%;
   padding: 3%;
   box-sizing: border-box;
+
+  display: flex;
+  flex-direction: column;
 }
 
+/* Scroll container for views that can overflow (playing/drinking) */
+.view-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+
+  scrollbar-width: none;
+}
+.view-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.view-header {
+  text-align: center;
+}
+
+.view-header .subtitle {
+  margin-top: 0.75rem;
+  opacity: 0.9;
+}
+
+/* Divider */
+.divider {
+  margin: 1rem 0;
+  opacity: 0.3;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* =========================================================
+   Hand Cards (shared)
+   ========================================================= */
 .card-hand {
   width: 100%;
   margin-top: 1.5rem;
+
   display: flex;
   justify-content: center;
   align-items: flex-end;
+
   padding: 0 1rem;
   box-sizing: border-box;
 }
 
-/* Selve kortet i hånda */
 .hand-card {
   position: relative;
   min-width: 120px;
@@ -62,15 +145,16 @@
   border-radius: 12px;
   border: 2px solid rgba(255, 255, 255, 0.2);
   background: #111;
+
   padding: 0.75rem;
+
   margin-left: -20px;
   transform-origin: bottom center;
 
-  /* 👉 alle kort starter litt nede, så valgt kort kan løftes */
   transform: translateY(8px) rotate(calc((var(--i) - (var(--total) - 1) / 2) * 8deg));
 
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.45);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
   cursor: pointer;
 }
 
@@ -80,7 +164,6 @@
 
 .hand-card:hover {
   box-shadow: 0 10px 20px rgba(0, 0, 0, 0.55);
-  /* evt. opacity: 0.9; */
 }
 
 .hand-card.is-selected {
@@ -89,12 +172,18 @@
   z-index: 2;
 }
 
+/* Single-card variant (waiting/drinking/effects) */
+.hand-card--single {
+  margin-left: 0;
+  transform: translateY(0) rotate(0);
+  cursor: default;
+}
+
 .hand-card-title {
-  font-weight: 600;
+  font-weight: 800;
   font-size: 0.9rem;
-  margin-bottom: 0.5rem;
-  color: white;
-  margin-bottom: 2rem;
+  margin: 0 0 2rem;
+  color: #fff;
 }
 
 .hand-card-body {
@@ -103,131 +192,188 @@
 }
 
 .hand-card-drink {
-  font-weight: 600;
+  font-weight: 800;
   font-size: 0.6rem;
-  color: white;
+  color: #fff;
 }
 
-.card-details {
-  width: 100%;
-  max-width: 420px;
-  margin-top: 1rem;
-  text-align: left;
-  box-sizing: border-box;
-  height: 300px;
+.hand-card-passive {
+  font-size: 0.7rem;
+  opacity: 0.8;
+  margin-top: 0.3rem;
 }
 
-.card-details-description {
-  margin-top: 0.5rem;
-  font-size: 0.9rem;
-  opacity: 0.85;
-  height: 5rem;
+/* =========================================================
+   Card Type Variants
+   ========================================================= */
+.hand-card.type-attack {
+  border-color: rgba(255, 120, 120, 0.4);
+  box-shadow: 0 8px 18px rgba(255, 80, 80, 0.35);
+  background: radial-gradient(circle at top, rgba(255, 120, 120, 0.18), transparent 55%), #111;
 }
-
-/* Base – kun hvit tekst */
-.card-meta {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: white;
-  margin-top: 0.75rem;
-
-  /* Ingen bakgrunn, ingen border */
-  background: transparent;
-  border: none;
-
-  /* Litt spacing så gløden ikke klippes */
-  padding: 0.25rem 0;
-
-  /* smooth fade når man bytter kort */
-  transition: text-shadow 0.2s ease;
+.hand-card.type-defence {
+  border-color: rgba(120, 255, 180, 0.4);
+  box-shadow: 0 8px 18px rgba(80, 200, 140, 0.35);
+  background: radial-gradient(circle at top, rgba(120, 255, 180, 0.18), transparent 55%), #111;
 }
-
-/* 🔴 Attack – rød lightsaber glow */
-.card-meta.card-type-attack {
-  text-shadow: 0 0 6px rgba(255, 80, 80, 0.9), 0 0 15px rgba(255, 80, 80, 0.8),
-    0 0 30px rgba(255, 40, 40, 0.7);
-}
-
-/* 🟢 Defence – grønn lightsaber glow */
-.card-meta.card-type-defence {
-  text-shadow: 0 0 6px rgba(80, 255, 160, 0.9), 0 0 15px rgba(80, 255, 180, 0.85),
-    0 0 30px rgba(40, 200, 120, 0.7);
-}
-
-/* 🔵 Curse – blå lightsaber glow */
-.card-meta.card-type-curse {
-  text-shadow: 0 0 6px rgba(120, 180, 255, 0.9), 0 0 15px rgba(160, 200, 255, 0.85),
-    0 0 30px rgba(120, 160, 255, 0.7);
-}
-
 .hand-card.type-curse {
   border-color: rgba(120, 180, 255, 0.35);
   box-shadow: 0 8px 18px rgba(50, 120, 255, 0.25);
   background: radial-gradient(circle at top, rgba(120, 180, 255, 0.18), transparent 55%), #111;
 }
 
-.hand-card.type-defence {
-  border-color: rgba(120, 255, 180, 0.4);
-  box-shadow: 0 8px 18px rgba(80, 200, 140, 0.35);
-  background: radial-gradient(circle at top, rgba(120, 255, 180, 0.18), transparent 55%), #111;
+.hand-card.type-attack .hand-card-title {
+  color: #ffb8b8;
+}
+.hand-card.type-defence .hand-card-title {
+  color: #b8ffd9;
+}
+.hand-card.type-curse .hand-card-title {
+  color: rgba(180, 210, 255, 0.85);
 }
 
-.hand-card.type-attack {
-  border-color: rgba(255, 120, 120, 0.4);
-  box-shadow: 0 8px 18px rgba(255, 80, 80, 0.35);
-  background: radial-gradient(circle at top, rgba(255, 120, 120, 0.18), transparent 55%), #111;
+.hand-card.type-attack.is-selected {
+  box-shadow: 0 20px 40px rgba(255, 80, 80, 0.6);
 }
-
 .hand-card.type-defence.is-selected {
   box-shadow: 0 20px 40px rgba(80, 200, 140, 0.6);
 }
 .hand-card.type-curse.is-selected {
   box-shadow: 0 20px 40px rgba(120, 180, 255, 0.6);
 }
-.hand-card.type-attack.is-selected {
-  box-shadow: 0 20px 40px rgba(255, 80, 80, 0.6);
-}
 
-.hand-card.type-defence .hand-card-title {
-  color: #b8ffd9;
-}
-.hand-card.type-curse .hand-card-title {
-  color: rgba(120, 180, 255, 0.6);
-}
-.hand-card.type-attack .hand-card-title {
-  color: #ffb8b8;
-}
-
-.waiting-state {
+/* =========================================================
+   Card Details (playing/drinking)
+   ========================================================= */
+.card-details {
   width: 100%;
-  padding: 3%;
+  max-width: 420px;
+  margin: 1rem auto 0;
+
+  text-align: left;
   box-sizing: border-box;
 
   display: flex;
   flex-direction: column;
+  gap: 0.6rem;
 }
 
-.waiting-state h2 {
-  text-align: center;
+.details-title {
+  margin: 0;
 }
 
-.waiting-state .subtitle {
-  margin-top: 2.5rem;
-  text-align: center;
-  opacity: 0.9;
+.card-details-description {
+  margin: 0;
+  font-size: 0.9rem;
+  opacity: 0.85;
 }
 
-.divider {
-  margin: 1rem 0;
-  opacity: 0.3;
+/* lightsaber-meta */
+.card-meta {
+  font-size: 1.1rem;
+  font-weight: 900;
+  color: #fff;
+  margin: 0.25rem 0 0;
+
+  background: transparent;
   border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.25rem 0;
+
+  transition: text-shadow 0.2s ease;
+}
+
+.card-meta.card-type-attack {
+  text-shadow: 0 0 6px rgba(255, 80, 80, 0.9), 0 0 15px rgba(255, 80, 80, 0.8),
+    0 0 30px rgba(255, 40, 40, 0.7);
+}
+.card-meta.card-type-defence {
+  text-shadow: 0 0 6px rgba(80, 255, 160, 0.9), 0 0 15px rgba(80, 255, 180, 0.85),
+    0 0 30px rgba(40, 200, 120, 0.7);
+}
+.card-meta.card-type-curse {
+  text-shadow: 0 0 6px rgba(120, 180, 255, 0.9), 0 0 15px rgba(160, 200, 255, 0.85),
+    0 0 30px rgba(120, 160, 255, 0.7);
+}
+
+/* =========================================================
+   Waiting / Drinking helpers
+   ========================================================= */
+.waiting-attack-wrapper {
+  margin-top: 1rem;
+  display: flex;
+  justify-content: center;
+}
+
+.attack-description {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  opacity: 0.85;
+  text-align: center;
+}
+
+.effect-cards-row {
+  width: 100%;
+  margin-top: 1.25rem;
+
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+
+  padding: 0 1rem;
+  box-sizing: border-box;
+}
+
+.effect-card {
+  margin-left: -20px;
+}
+
+.effect-card:first-child {
+  margin-left: 0;
+}
+
+.total-drinks {
+  margin-top: 0.75rem;
+  text-align: center;
+  font-weight: 800;
+}
+
+.calc-details {
+  margin-top: 0.35rem;
+  font-size: 0.85rem;
+  opacity: 0.8;
+  text-align: center;
+}
+
+/* =========================================================
+   Waiting list scroll area
+   ========================================================= */
+.waiting-list-section {
+  flex: 1;
+  min-height: 0;
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.waiting-player-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+
+  scrollbar-width: none;
+}
+.waiting-player-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .waiting-player-list {
   list-style: none;
   padding: 0;
   margin: 0;
+
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -238,6 +384,7 @@
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.12);
+
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -250,10 +397,6 @@
     rgba(0, 0, 0, 0.7);
 }
 
-.waiting-card {
-  margin-top: 1.5rem;
-}
-
 .wp-main {
   display: flex;
   justify-content: space-between;
@@ -261,11 +404,11 @@
 }
 
 .wp-name {
-  font-weight: 600;
+  font-weight: 800;
 }
 
 .wp-lives {
-  font-weight: 600;
+  font-weight: 800;
   opacity: 0.9;
 }
 
@@ -274,23 +417,11 @@
   opacity: 0.7;
 }
 
-.waiting-attack-wrapper {
-  margin-top: 1rem;
-  display: flex;
-  justify-content: center;
-}
-
-/* Overstyr hånd-layout for enkeltkort i waiting */
-.waiting-hand-card {
-  margin-left: 0;
-  transform: translateY(0) rotate(0);
-  cursor: default;
-}
-
-/* 🎯 TARGET-SELECTION (velg hvem som får kortet) */
-
+/* =========================================================
+   Target selection
+   ========================================================= */
 .target-select {
-  margin-top: 1.75rem;
+  margin-top: 1.25rem;
   padding: 0.9rem 0.9rem 1.1rem;
   border-radius: 12px;
   background: rgba(0, 0, 0, 0.65);
@@ -298,37 +429,38 @@
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
 }
 
-.target-select h3 {
+.target-title {
   font-size: 0.95rem;
-  margin: 0;
+  margin: 0 0 0.75rem;
   text-align: left;
 }
 
-/* Scrollbar-container */
 .target-list {
-  margin: 0.75rem 0 0.5rem;
+  margin: 0;
   padding: 0;
   list-style: none;
 
-  max-height: 200px; /* 👈 begrenser høyden */
-  overflow-y: auto; /* 👈 scrolling hvis mange spillere */
+  max-height: 200px;
+  overflow-y: auto;
+
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+
+  scrollbar-width: none;
+}
+.target-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
-/* Hver rad */
-.target-row {
-  width: 100%;
-}
-
-/* Selve knappen per spiller */
 .target-button {
   width: 100%;
   padding: 0.55rem 0.8rem;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(10, 10, 10, 0.9);
+
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -336,7 +468,7 @@
 
   font-size: 0.9rem;
   cursor: pointer;
-  color: white;
+  color: #fff;
 
   transition: background 0.12s ease, border-color 0.12s ease, transform 0.08s ease,
     box-shadow 0.12s ease;
@@ -349,7 +481,6 @@
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.65);
 }
 
-/* Når en spiller er valgt */
 .target-button.is-selected {
   border-color: rgba(255, 215, 0, 0.9);
   box-shadow: 0 0 14px rgba(255, 215, 0, 0.4);
@@ -357,93 +488,18 @@
     rgba(10, 10, 10, 0.95);
 }
 
-/* Tekst inni knappen */
 .target-name {
-  font-weight: 600;
-  color: white;
+  font-weight: 800;
 }
 
 .target-lives {
   font-size: 0.85rem;
   opacity: 0.9;
-  color: white;
 }
 
-/* Knapperad under lista */
 .target-actions {
   margin-top: 0.75rem;
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
-}
-
-/* Attack-kort beskrivelse under kortet */
-.attack-description {
-  margin-top: 0.75rem;
-  font-size: 0.9rem;
-  opacity: 0.85;
-  text-align: center;
-}
-
-/* Rad med curse + defence-kort i effect-sequence */
-.effect-cards-row {
-  width: 100%;
-  margin-top: 1.25rem;
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  padding: 0 1rem;
-  box-sizing: border-box;
-}
-
-/* Kortene som ligger i rad – samme størrelse som hand-card, men uten tilt */
-.effect-card {
-  margin-left: -20px;
-  transform: translateY(0) rotate(0);
-  cursor: default;
-}
-
-.effect-card:first-child {
-  margin-left: 0;
-}
-
-/* Passiv-tekst inni kortene i effect-sequence */
-.hand-card-passive {
-  font-size: 0.7rem;
-  opacity: 0.8;
-  margin-top: 0.3rem;
-}
-
-/* Litt finere tekst under totalen */
-.calc-details {
-  margin-top: 0.35rem;
-  font-size: 0.85rem;
-  opacity: 0.8;
-}
-
-/* 🔔 Fullscreen "det er DIN tur"-ramme */
-.round-wrapper.is-my-turn::before {
-  content: '';
-  position: fixed;
-  inset: 0; /* top:0, right:0, bottom:0, left:0 */
-  border: 4px solid rgba(255, 215, 0, 0.95);
-  box-shadow: 0 0 12px rgba(255, 215, 0, 0.8), 0 0 28px rgba(255, 215, 0, 0.7);
-  pointer-events: none; /* ikke blokker klikk */
-  z-index: 999; /* over alt annet */
-  border-radius: 8px;
-
-  animation: myTurnPulse 1.2s ease-in-out infinite;
-}
-
-/* Liten puls-animasjon på rammen */
-@keyframes myTurnPulse {
-  0% {
-    box-shadow: 0 0 8px rgba(255, 215, 0, 0.6), 0 0 18px rgba(255, 215, 0, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 16px rgba(255, 215, 0, 1), 0 0 34px rgba(255, 215, 0, 0.9);
-  }
-  100% {
-    box-shadow: 0 0 8px rgba(255, 215, 0, 0.6), 0 0 18px rgba(255, 215, 0, 0.4);
-  }
 }

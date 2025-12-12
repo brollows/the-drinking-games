@@ -1,10 +1,9 @@
 <div class="app">
-  <router-outlet></router-outlet>
+  <main class="app-page">
+    <router-outlet></router-outlet>
+  </main>
 
-  <!-- FOOTER – vises bare når IKKE på home -->
   <footer *ngIf="showHomeButton">
-    <button class="btn secondary" [routerLink]="['/']">
-      ⬅ Home
-    </button>
+    <button class="btn secondary" [routerLink]="['/']">⬅ Home</button>
   </footer>
 </div>

@@ -14,9 +14,7 @@ import { SupabaseService } from './services/supabase.service';
 export class AppComponent {
   showHomeButton = true;
 
-  constructor(
-    private router: Router,
-    private supabase: SupabaseService) {
+  constructor(private router: Router, private supabase: SupabaseService) {
     this.router.events.subscribe((event) => {
       if (event instanceof NavigationEnd) {
         const url = event.urlAfterRedirects;
@@ -31,15 +29,12 @@ export class AppComponent {
   async ngOnInit() {
     console.log('Tester Supabase connection...');
 
-    const { data, error } = await this.supabase.client
-      .from('game_sessions')
-      .select('*')
-      .limit(1);
+    const { data, error } = await this.supabase.client.from('game_sessions').select('*').limit(1);
 
     if (error) {
       console.error('Supabase ERROR:', error);
     } else {
-      console.log("Supabase OK! ");
+      console.log('Supabase OK! ');
     }
   }
 }

@@ -1,37 +1,37 @@
-<section class="card">
+<section class="card card-fill">
   <h2>Game</h2>
 
-  <p class="subtitle">
-    Del koden med vennene dine så de kan bli med på spillet 👇
-  </p>
+  <p class="subtitle">Del koden med vennene dine så de kan bli med på spillet 👇</p>
 
   <div class="join-code">
     {{ getSessionCode() }}
   </div>
 
-  <button 
-    class="btn primary" 
+  <button
+    class="btn primary"
     *ngIf="playerName === session?.hostName"
     (click)="onStartRound()"
-    style="margin-top: 1rem;"
+    style="margin-top: 1rem"
   >
     Start spill
   </button>
 
-  <hr style="margin: 1.5rem 0; opacity: 0.4;">
+  <hr style="margin: 1.5rem 0; opacity: 0.4" />
 
   <h3>Spillere i dette spillet</h3>
 
-  <ul class="player-list">
-    <li
-      *ngFor="let p of players; trackBy: trackPlayer"
-      class="player-row"
-      [class.is-host]="p.isHost"
-    >
-      <div class="player-main">
-        <span class="player-name">{{ p.name }}</span>
-        <span *ngIf="p.isHost" class="badge host-badge">Host</span>
-      </div>
-    </li>
-  </ul>
+  <div class="player-list-scroll">
+    <ul class="player-list">
+      <li
+        *ngFor="let p of players; trackBy: trackPlayer"
+        class="player-row"
+        [class.is-host]="p.isHost"
+      >
+        <div class="player-main">
+          <span class="player-name">{{ p.name }}</span>
+          <span *ngIf="p.isHost" class="badge host-badge">Host</span>
+        </div>
+      </li>
+    </ul>
+  </div>
 </section>
