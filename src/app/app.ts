@@ -26,15 +26,5 @@ export class AppComponent {
     });
   }
 
-  async ngOnInit() {
-    console.log('Tester Supabase connection...');
-
-    const { data, error } = await this.supabase.client.from('game_sessions').select('*').limit(1);
-
-    if (error) {
-      console.error('Supabase ERROR:', error);
-    } else {
-      console.log('Supabase OK! ');
-    }
-  }
+  async ngOnInit() {}
 }

@@ -41,7 +41,6 @@
 ========================= -->
 <ng-template #playing>
   <section class="view view-playing">
-    <!-- Scroll-område for hele playing-innholdet -->
     <div class="view-scroll">
       <header class="view-header">
         <h2>Din tur</h2>
@@ -61,10 +60,9 @@
           [style.--i]="i"
           [style.--total]="hand.length"
         >
-          <div class="hand-card-title">{{ c.title }}</div>
-          <div class="hand-card-body">
-            <div class="hand-card-drink">{{ getCardTypeUpper(c) }}</div>
-          </div>
+          <ng-container
+            *ngTemplateOutlet="cardFace; context: { $implicit: c, mode: 'hand' }"
+          ></ng-container>
         </button>
       </div>
 
@@ -137,17 +135,10 @@
           </p>
 
           <div class="waiting-attack-wrapper">
-            <button
-              class="hand-card hand-card--single"
-              [class.type-attack]="lastPlayedCard.type === 'attack'"
-              disabled
-            >
-              <div class="hand-card-title">{{ lastPlayedCard.title }}</div>
-              <div class="hand-card-body">
-                <div class="hand-card-drink">
-                  {{ getCardTypeUpper(lastPlayedCard) }}
-                </div>
-              </div>
+            <button class="hand-card hand-card--single" [class.type-attack]="true" disabled>
+              <ng-container
+                *ngTemplateOutlet="cardFace; context: { $implicit: lastPlayedCard, mode: 'single' }"
+              ></ng-container>
             </button>
           </div>
 
@@ -167,11 +158,9 @@
                 [class.type-curse]="c.type === 'curse'"
                 disabled
               >
-                <div class="hand-card-title">{{ c.title }}</div>
-                <div class="hand-card-body">
-                  <div class="hand-card-drink">{{ getCardTypeUpper(c) }}</div>
-                  <div class="hand-card-passive">{{ getCardPassive(c) }}</div>
-                </div>
+                <ng-container
+                  *ngTemplateOutlet="cardFace; context: { $implicit: c, mode: 'single' }"
+                ></ng-container>
               </button>
             </div>
 
@@ -192,8 +181,7 @@
         <ng-template #nonAttackInfo>
           <p class="subtitle">
             <strong>{{ lastPlayedBy?.name }}</strong>
-            spilte et
-            <strong>{{ getCardTypeUpper(lastPlayedCard) }}</strong
+            spilte et <strong>{{ getCardTypeUpper(lastPlayedCard) }}</strong
             >-kort 🍻
           </p>
         </ng-template>
@@ -245,7 +233,6 @@
 ========================= -->
 <ng-template #drinking>
   <section class="view view-drinking">
-    <!-- også scroll-safe her om teksten blir lang -->
     <div class="view-scroll">
       <header class="view-header">
         <p class="subtitle">
@@ -262,10 +249,9 @@
           [class.type-curse]="pendingAttackCard.type === 'curse'"
           disabled
         >
-          <div class="hand-card-title">{{ pendingAttackCard.title }}</div>
-          <div class="hand-card-body">
-            <div class="hand-card-drink">{{ getCardTypeUpper(pendingAttackCard) }}</div>
-          </div>
+          <ng-container
+            *ngTemplateOutlet="cardFace; context: { $implicit: pendingAttackCard, mode: 'single' }"
+          ></ng-container>
         </button>
       </div>
 
@@ -285,11 +271,9 @@
             [class.type-curse]="c.type === 'curse'"
             disabled
           >
-            <div class="hand-card-title">{{ c.title }}</div>
-            <div class="hand-card-body">
-              <div class="hand-card-drink">{{ getCardTypeUpper(c) }}</div>
-              <div class="hand-card-passive">{{ getCardPassive(c) }}</div>
-            </div>
+            <ng-container
+              *ngTemplateOutlet="cardFace; context: { $implicit: c, mode: 'single' }"
+            ></ng-container>
           </button>
         </div>
       </div>
@@ -326,4 +310,25 @@
     <h2>Spillet er ferdig 🎉</h2>
     <p>Her kan vi vise hvem som vant og evt. "nytt spill".</p>
   </section>
+</ng-template>
+
+<!-- =========================
+      CARD TEMPLATE (re-used everywhere)
+      - $implicit = card
+      - mode = 'hand' | 'single'
+========================= -->
+<ng-template #cardFace let-card let-mode="mode">
+  <div class="card-img">
+    <img
+      class="card-image"
+      [src]="getCardImageSrc(card)"
+      (error)="onCardImgError($event)"
+      loading="lazy"
+    />
+  </div>
+
+  <div class="card-info">
+    <div class="card-title" [ngClass]="getTitleSizeClass(card.title)">{{ card.title }}</div>
+    <div class="card-type">{{ getCardTypeUpper(card) }}</div>
+  </div>
 </ng-template>

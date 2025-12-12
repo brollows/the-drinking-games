@@ -46,8 +46,8 @@ body {
   display: flex;
   flex-direction: column;
 
-  padding: calc(1rem + var(--safe-top)) calc(1.5rem + var(--safe-right))
-    calc(1rem + var(--safe-bottom)) calc(1.5rem + var(--safe-left));
+  padding: calc(1rem + var(--safe-top)) calc(1rem + var(--safe-right))
+    calc(1rem + var(--safe-bottom)) calc(1rem + var(--safe-left));
 }
 
 /* Router outlet wrapper (main content area) */

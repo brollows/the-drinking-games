@@ -577,4 +577,39 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     return `Base: ${baseStr} → Totalt: ${totalStr} etter curse/defence-effekter.`;
   }
+
+  private readonly cardImgBase = '/assets/cards';
+
+  getCardImageSrc(card: any): string {
+    return `${this.cardImgBase}/${card.id}.png`; // senere
+  }
+
+  onCardImgError(ev: Event) {
+    const img = ev.target as HTMLImageElement;
+    if (img.src.endsWith('/default.png')) return;
+    img.src = `${this.cardImgBase}/default.png`;
+  }
+
+  getTitleSizeClass(title: string): string {
+    if (!title) return 'title-normal';
+
+    const t = title.trim();
+
+    // ord = sekvenser uten mellomrom (så "Skolegangster" blir ett ord)
+    const words = t.split(/\s+/).filter(Boolean);
+
+    const longestWordLen = words.length ? Math.max(...words.map((w) => w.length)) : 0;
+
+    // total lengde inkl. symboler/punktum osv (men uten mellomrom)
+    const totalNoSpaces = t.replace(/\s+/g, '').length;
+
+    // Regler:
+    // - veldig lange enkeltord (>= 14) => XS
+    // - lange enkeltord (>= 11) => SM
+    // - eller: veldig lang tittel totalt => SM/XS
+    if (longestWordLen >= 14 || totalNoSpaces >= 28) return 'title-xs';
+    if (longestWordLen >= 11 || totalNoSpaces >= 20) return 'title-sm';
+
+    return 'title-normal';
+  }
 }

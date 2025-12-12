@@ -5,12 +5,11 @@
   position: relative;
   height: 100%;
   min-height: 0;
-
   display: flex;
   flex-direction: column;
 }
 
-/* Fullscreen "din tur" ramme */
+/* Fullscreen glow */
 .round-wrapper.is-my-turn::before {
   content: '';
   position: fixed;
@@ -19,9 +18,8 @@
   z-index: 999;
   border-radius: 16px;
 
-  box-shadow:
-    /* 🌟 YTRE GLOW */ 0 0 14px rgba(255, 215, 0, 0.6), 0 0 32px rgba(255, 215, 0, 0.5),
-    0 0 70px rgba(255, 200, 0, 0.45), /* 🔥 INDRE GLOW */ inset 0 0 12px rgba(255, 215, 0, 0.35),
+  box-shadow: 0 0 14px rgba(255, 215, 0, 0.6), 0 0 32px rgba(255, 215, 0, 0.5),
+    0 0 70px rgba(255, 200, 0, 0.45), inset 0 0 12px rgba(255, 215, 0, 0.35),
     inset 0 0 26px rgba(255, 215, 0, 0.25);
 
   animation: myTurnGlow 1.4s ease-in-out infinite;
@@ -87,18 +85,15 @@
   width: 100%;
   padding: 3%;
   box-sizing: border-box;
-
   display: flex;
   flex-direction: column;
 }
 
-/* Scroll container for views that can overflow (playing/drinking) */
 .view-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-
   scrollbar-width: none;
 }
 .view-scroll::-webkit-scrollbar {
@@ -115,7 +110,6 @@
   opacity: 0.9;
 }
 
-/* Divider */
 .divider {
   margin: 1rem 0;
   opacity: 0.3;
@@ -124,7 +118,21 @@
 }
 
 /* =========================================================
-   Hand Cards (shared)
+   FIX: Ikke klipp kortene i playing (pga overflow)
+   ========================================================= */
+.view-playing .view-scroll {
+  overflow-x: visible; /* viktig: lar roterte kort stikke ut sidelengs/opp */
+  overflow-y: auto; /* behold scroll som før */
+}
+
+.view-playing .card-hand::before {
+  content: '';
+  display: block;
+  height: 12px;
+}
+
+/* =========================================================
+   Hand Cards Container
    ========================================================= */
 .card-hand {
   width: 100%;
@@ -136,26 +144,42 @@
 
   padding: 0 1rem;
   box-sizing: border-box;
+
+  /* 🔧 ny: sørg for at hånden ligger "foran" og ikke klippes visuelt */
+  position: relative;
+  z-index: 5;
 }
 
+/* =========================================================
+   Card (static size + image)
+   ========================================================= */
 .hand-card {
   position: relative;
-  min-width: 120px;
+
+  width: 120px;
   height: 170px;
-  border-radius: 12px;
+
+  padding: 6px;
+  border-radius: 14px;
+  overflow: hidden;
+
   border: 2px solid rgba(255, 255, 255, 0.2);
   background: #111;
 
-  padding: 0.75rem;
-
-  margin-left: -20px;
+  margin-left: -35px;
   transform-origin: bottom center;
 
   transform: translateY(8px) rotate(calc((var(--i) - (var(--total) - 1) / 2) * 8deg));
-
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.45);
+
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   cursor: pointer;
+
+  display: flex;
+  flex-direction: column;
+  color: #fff;
+
+  /* 🔑 IKKE gap her, vi håndterer spacing inni card-info */
 }
 
 .hand-card:first-child {
@@ -172,35 +196,80 @@
   z-index: 2;
 }
 
-/* Single-card variant (waiting/drinking/effects) */
+/* Single-card variant */
 .hand-card--single {
   margin-left: 0;
   transform: translateY(0) rotate(0);
   cursor: default;
 }
 
-.hand-card-title {
+.card-img {
+  flex: 0 0 56%;
+  min-height: 0;
+}
+
+/* 60% image */
+.card-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+  display: block;
+}
+
+.card-info {
+  flex: 1 1 auto;
+  min-height: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  padding: 6px 6px 4px;
+  box-sizing: border-box;
+}
+
+.card-title {
   font-weight: 800;
-  font-size: 0.9rem;
-  margin: 0 0 2rem;
-  color: #fff;
+  line-height: 1.1;
+  text-align: center;
+
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+
+  word-break: keep-all;
+  overflow-wrap: normal;
+  hyphens: none;
+
+  /* litt luft, men ikke for mye */
+  margin-top: 2px;
 }
 
-.hand-card-body {
-  font-size: 0.8rem;
-  opacity: 0.8;
+.card-title.title-normal {
+  font-size: 1rem;
 }
 
-.hand-card-drink {
-  font-weight: 800;
-  font-size: 0.6rem;
-  color: #fff;
+.card-title.title-sm {
+  font-size: 0.85rem;
 }
 
-.hand-card-passive {
+.card-title.title-xs {
   font-size: 0.7rem;
-  opacity: 0.8;
-  margin-top: 0.3rem;
+}
+
+.card-type {
+  margin-top: auto;
+  padding-top: 4px;
+
+  text-align: center;
+  font-weight: 900;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  opacity: 0.9;
+
+  /* 🔑 sørger for at det aldri krymper bort */
+  flex: 0 0 auto;
 }
 
 /* =========================================================
@@ -211,39 +280,42 @@
   box-shadow: 0 8px 18px rgba(255, 80, 80, 0.35);
   background: radial-gradient(circle at top, rgba(255, 120, 120, 0.18), transparent 55%), #111;
 }
+
 .hand-card.type-defence {
   border-color: rgba(120, 255, 180, 0.4);
   box-shadow: 0 8px 18px rgba(80, 200, 140, 0.35);
   background: radial-gradient(circle at top, rgba(120, 255, 180, 0.18), transparent 55%), #111;
 }
+
 .hand-card.type-curse {
   border-color: rgba(120, 180, 255, 0.35);
   box-shadow: 0 8px 18px rgba(50, 120, 255, 0.25);
   background: radial-gradient(circle at top, rgba(120, 180, 255, 0.18), transparent 55%), #111;
 }
 
-.hand-card.type-attack .hand-card-title {
+/* Title tint per type */
+.hand-card.type-attack .card-type {
   color: #ffb8b8;
 }
-.hand-card.type-defence .hand-card-title {
+.hand-card.type-defence .card-type {
   color: #b8ffd9;
 }
-.hand-card.type-curse .hand-card-title {
+.hand-card.type-curse .card-type {
   color: rgba(180, 210, 255, 0.85);
 }
 
 .hand-card.type-attack.is-selected {
-  box-shadow: 0 20px 40px rgba(255, 80, 80, 0.6);
+  box-shadow: 0 15px 20px rgba(255, 80, 80, 0.6);
 }
 .hand-card.type-defence.is-selected {
-  box-shadow: 0 20px 40px rgba(80, 200, 140, 0.6);
+  box-shadow: 0 15px 20px rgba(80, 200, 140, 0.6);
 }
 .hand-card.type-curse.is-selected {
-  box-shadow: 0 20px 40px rgba(120, 180, 255, 0.6);
+  box-shadow: 0 15px 20px rgba(120, 180, 255, 0.6);
 }
 
 /* =========================================================
-   Card Details (playing/drinking)
+   Details / meta
    ========================================================= */
 .card-details {
   width: 100%;
@@ -268,17 +340,14 @@
   opacity: 0.85;
 }
 
-/* lightsaber-meta */
 .card-meta {
   font-size: 1.1rem;
   font-weight: 900;
   color: #fff;
   margin: 0.25rem 0 0;
-
   background: transparent;
   border: none;
   padding: 0.25rem 0;
-
   transition: text-shadow 0.2s ease;
 }
 
@@ -314,11 +383,9 @@
 .effect-cards-row {
   width: 100%;
   margin-top: 1.25rem;
-
   display: flex;
   justify-content: center;
   align-items: flex-end;
-
   padding: 0 1rem;
   box-sizing: border-box;
 }
@@ -326,7 +393,6 @@
 .effect-card {
   margin-left: -20px;
 }
-
 .effect-card:first-child {
   margin-left: 0;
 }
@@ -345,12 +411,11 @@
 }
 
 /* =========================================================
-   Waiting list scroll area
+   Waiting list scroll
    ========================================================= */
 .waiting-list-section {
   flex: 1;
   min-height: 0;
-
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -361,7 +426,6 @@
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-
   scrollbar-width: none;
 }
 .waiting-player-scroll::-webkit-scrollbar {
@@ -373,7 +437,6 @@
   list-style: none;
   padding: 0;
   margin: 0;
-
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -384,7 +447,6 @@
   border-radius: 10px;
   background: rgba(0, 0, 0, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.12);
-
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
