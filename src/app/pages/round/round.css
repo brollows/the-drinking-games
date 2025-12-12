@@ -614,3 +614,17 @@
   justify-content: flex-end;
   gap: 0.5rem;
 }
+
+.effect-card-stacked.is-revealed {
+  transform: translate(-50%, calc(-50% + (var(--lift, 0) * -1px))) translateX(0px)
+    rotate(var(--rot, 0deg)) scale(1);
+}
+
+@keyframes pileThud {
+  0% {
+    transform: translate(-50%, -50%) translateX(0px) rotate(var(--rot, 0deg)) scale(1.06);
+  }
+  100% {
+    transform: translate(-50%, -50%) translateX(0px) rotate(var(--rot, 0deg)) scale(1);
+  }
+}

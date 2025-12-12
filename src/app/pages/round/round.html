@@ -168,8 +168,13 @@
                 <span class="wp-lives">{{ p.lives }} 🍻</span>
               </div>
 
-              <div class="wp-meta" *ngIf="p.id === currentTurnPlayerId">Spiller nå</div>
-              <div class="wp-meta" *ngIf="p.id !== currentTurnPlayerId">Venter på tur</div>
+              <div class="wp-meta" *ngIf="playerHasSkip[p.id]">Skipper neste tur ⏭️</div>
+              <div class="wp-meta" *ngIf="!playerHasSkip[p.id] && p.id === currentTurnPlayerId">
+                Spiller nå
+              </div>
+              <div class="wp-meta" *ngIf="!playerHasSkip[p.id] && p.id !== currentTurnPlayerId">
+                Venter på tur
+              </div>
             </li>
           </ul>
         </div>
@@ -274,7 +279,7 @@
     {{ pendingAttackCard.description }}
   </p>
 
-  <div class="effect-sequence" *ngIf="attackSequenceCards.length > 1">
+  <div class="effect-sequence" *ngIf="allEffectCards.length > 0">
     <h3>Effekter i spill</h3>
 
     <!-- ✅ Progress dots -->
@@ -298,6 +303,7 @@
           [style.--rot]="getEffectRotation(i)"
           [style.--from]="getEffectFrom(i)"
           [style.zIndex]="100 + i"
+          [style.--lift]="i"
           disabled
         >
           <ng-container *ngTemplateOutlet="cardFace; context: { $implicit: c, mode: 'single' }">

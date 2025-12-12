@@ -119,6 +119,8 @@ export class RoundComponent implements OnInit, OnDestroy {
       this.players = players;
       this.roundState = roundState;
 
+      await this.refreshSkipIndicators();
+
       const meId = this.me?.id ?? null;
 
       if (meId) {
@@ -143,6 +145,8 @@ export class RoundComponent implements OnInit, OnDestroy {
 
       await this.syncPendingAttackEffects();
 
+      await this.maybeConsumeSkipTurn();
+
       if (this.viewState !== 'lost' && this.viewState !== 'finished') {
         this.updateViewStateFromRoundState();
       }
@@ -155,7 +159,8 @@ export class RoundComponent implements OnInit, OnDestroy {
       } catch {
         // ignorer hvis view er destroyed
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.message === '__SKIP_CONSUMED__') return;
       console.error('Kunne ikke refreshState i round:', e);
     }
   }
@@ -430,7 +435,8 @@ export class RoundComponent implements OnInit, OnDestroy {
     const curseCards: Card[] = this.pendingAttackEffects
       .filter((e) => e.effectType === 'curse')
       .map((e) => this.cards.getCardById(e.cardId))
-      .filter((c): c is Card => !!c);
+      .filter((c): c is Card => !!c)
+      .filter((c) => !(c.passive ?? []).includes('skip')); // ✅ fjern skip fra drinking
 
     const defenceCards: Card[] = this.pendingAttackEffects
       .filter((e) => e.effectType === 'defence')
@@ -568,7 +574,9 @@ export class RoundComponent implements OnInit, OnDestroy {
 
   // ✅ use all effects, not slice (so we can stack + animate)
   get allEffectCards(): Card[] {
-    return this.attackSequenceCards.slice(1);
+    const effects = this.attackSequenceCards.slice(1);
+    // expectedEffectCount er basert på stepTotals og tar hensyn til shield/reflect/0
+    return effects.slice(0, this.expectedEffectCount);
   }
 
   // ✅ button gating
@@ -668,7 +676,7 @@ export class RoundComponent implements OnInit, OnDestroy {
       const rot = Math.floor(Math.random() * 51) - 25; // -25..25
       this.effectRotations.push(`${rot}deg`);
 
-      const from = Math.random() < 0.5 ? '-160px' : '160px';
+      const from = Math.random() < 0.5 ? '-110px' : '110px';
       this.effectFrom.push(from);
     }
   }
@@ -678,7 +686,7 @@ export class RoundComponent implements OnInit, OnDestroy {
   }
 
   getEffectFrom(i: number): string {
-    return this.effectFrom[i] ?? '160px';
+    return this.effectFrom[i] ?? '110px';
   }
 
   private startAttackAnimationIfNeeded() {
@@ -715,8 +723,12 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     const base = this.pendingAttackCard?.drinkAmount ?? 0;
 
-    const effectsCount = Math.max(0, this.attackSequenceCards.length - 1);
+    const effectsCount = Math.max(0, this.stepTotals.length - 1);
+
     this.initEffectVisuals(effectsCount);
+    try {
+      this.cdr.detectChanges();
+    } catch {}
 
     // start: 0 effects synlig, total = base (stepTotals[0])
     this.effectRevealCount = 0;
@@ -742,11 +754,11 @@ export class RoundComponent implements OnInit, OnDestroy {
         return;
       }
 
-      this.attackAnimTimer = setTimeout(tick, 5000);
+      this.attackAnimTimer = setTimeout(tick, 2500);
     };
 
     // ✅ behold 5 sek før første effect
-    this.attackAnimTimer = setTimeout(tick, 5000);
+    this.attackAnimTimer = setTimeout(tick, 2000);
   }
 
   getAttackTotalBreakdownAnimated(): string {
@@ -760,5 +772,83 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     if (total === base) return `Base: ${baseStr}.`;
     return `Base: ${baseStr} → Nå: ${totalStr}.`;
+  }
+
+  private async maybeConsumeSkipTurn() {
+    const rs = this.roundState;
+    const me = this.me;
+    const sessionId = this.sessionId;
+
+    if (!rs || !me || !sessionId) return;
+
+    // Bare når det er MIN tur og vi ikke er i pendingAttack
+    const currentTurnId = rs.turnOrder[rs.currentTurnIndex] ?? null;
+    if (rs.pendingAttack) return;
+    if (currentTurnId !== me.id) return;
+
+    // Hent effekter på meg og se etter curse:skip
+    let effects: PlayerEffect[] = [];
+    try {
+      effects = await this.gameSession.getPlayerEffectsForSession(sessionId, me.id);
+    } catch {
+      return;
+    }
+
+    const skipEffects = effects.filter((e) => e.effectType === 'curse');
+    const skipIds: string[] = [];
+
+    for (const e of skipEffects) {
+      let card: Card | null = null;
+      try {
+        card = this.cards.getCardById(e.cardId);
+      } catch {}
+
+      if (card && (card.passive ?? []).includes('skip')) {
+        skipIds.push(e.id);
+      }
+    }
+
+    if (!skipIds.length) return;
+
+    await this.gameSession.removePlayerEffects(sessionId, skipIds);
+    await this.gameSession.advanceTurn(sessionId);
+
+    // Ikke gjør mer i denne refreshen – la polling hente ny roundState
+    this.viewState = 'waiting';
+    throw new Error('__SKIP_CONSUMED__');
+  }
+
+  playerHasSkip: Record<string, boolean> = {};
+  private lastSkipScanAt = 0;
+
+  private async refreshSkipIndicators() {
+    const sessionId = this.sessionId;
+    if (!sessionId) return;
+
+    const now = Date.now();
+    if (now - this.lastSkipScanAt < 2500) return; // ✅ ikke hver poll
+    this.lastSkipScanAt = now;
+
+    const map: Record<string, boolean> = {};
+    await Promise.all(
+      this.players.map(async (p) => {
+        try {
+          const effects = await this.gameSession.getPlayerEffectsForSession(sessionId, p.id);
+          map[p.id] = effects.some((e) => {
+            if (e.effectType !== 'curse') return false;
+            try {
+              const c = this.cards.getCardById(e.cardId);
+              return (c.passive ?? []).includes('skip');
+            } catch {
+              return false;
+            }
+          });
+        } catch {
+          map[p.id] = false;
+        }
+      })
+    );
+
+    this.playerHasSkip = map;
   }
 }

@@ -554,4 +554,19 @@ export class GameSessionService {
       throw rsError;
     }
   }
+
+  async removePlayerEffects(sessionId: string, effectIds: string[]): Promise<void> {
+    if (!effectIds?.length) return;
+
+    const { error } = await this.supabase.client
+      .from('player_effects')
+      .delete()
+      .eq('session_id', sessionId)
+      .in('id', effectIds);
+
+    if (error) {
+      console.error('Feil ved removePlayerEffects:', error);
+      throw error;
+    }
+  }
 }
