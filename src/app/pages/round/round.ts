@@ -186,7 +186,8 @@ export class RoundComponent implements OnInit, OnDestroy {
         this.gameSession.getRoundState(this.sessionId),
       ]);
 
-      this.players = players;
+      this.players = this.sortPlayersByTurnOrder(players, roundState);
+
       this.roundState = roundState;
 
       await this.refreshSkipIndicators();
@@ -1230,8 +1231,16 @@ export class RoundComponent implements OnInit, OnDestroy {
     this.wheelTransition = 'none';
     this.wheelTransform = `translateY(-${startY}px)`;
 
+    // 🎯 tilfeldig landing INNI navnet (men aldri i kanten)
+    const safeMargin = 1; // px
+    const halfItem = this.WHEEL_ITEM_H / 2;
+
+    // random offset innenfor navneblokka
+    const randomOffset =
+      Math.random() * (this.WHEEL_ITEM_H - safeMargin * 2) - halfItem + safeMargin;
+
     const finalY =
-      landingIndex * this.WHEEL_ITEM_H + this.WHEEL_ITEM_H / 2 - this.WHEEL_WINDOW_H / 2;
+      landingIndex * this.WHEEL_ITEM_H + halfItem + randomOffset - this.WHEEL_WINDOW_H / 2;
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -1265,5 +1274,24 @@ export class RoundComponent implements OnInit, OnDestroy {
         this.cdr.detectChanges();
       } catch {}
     }, 10000);
+  }
+
+  private sortPlayersByTurnOrder(players: Player[], rs: RoundState | null): Player[] {
+    if (!rs || !rs.turnOrder?.length) return players;
+
+    const orderMap = new Map<string, number>();
+    rs.turnOrder.forEach((id, index) => orderMap.set(id, index));
+
+    return [...players].sort((a, b) => {
+      const ia = orderMap.get(a.id);
+      const ib = orderMap.get(b.id);
+
+      // spillere som av en eller annen grunn ikke er i turnOrder havner nederst
+      if (ia === undefined && ib === undefined) return 0;
+      if (ia === undefined) return 1;
+      if (ib === undefined) return -1;
+
+      return ia - ib;
+    });
   }
 }

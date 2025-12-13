@@ -780,3 +780,12 @@ button:disabled {
   font-size: 0.85rem;
   opacity: 0.75;
 }
+
+/* round.css */
+.view .subtitle {
+  /* dine ønskede felles verdier */
+  font-size: 1.1rem;
+  line-height: 1.35;
+  margin: 0.75rem 0 0;
+  text-align: center;
+}
