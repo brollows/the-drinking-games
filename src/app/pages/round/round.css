@@ -206,6 +206,17 @@ button:disabled {
   cursor: not-allowed !important;
   pointer-events: none;
 }
+/* ✅ Effekt-kort skal være HELT skjult før reveal (overstyr global disabled-opacity) */
+.effect-stack button.effect-card-stacked:disabled {
+  opacity: 0 !important;
+  visibility: hidden;
+}
+
+/* ✅ Når de er revealet: synlige */
+.effect-stack button.effect-card-stacked.is-revealed:disabled {
+  opacity: 1 !important;
+  visibility: visible;
+}
 
 .card-img {
   flex: 0 0 56%;
@@ -466,6 +477,15 @@ button:disabled {
   opacity: 0.8;
 }
 
+/* ✅ reflect button */
+.btn.danger {
+  background: linear-gradient(135deg, rgba(255, 80, 80, 0.95), rgba(255, 35, 35, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 16px rgba(255, 40, 40, 0.55);
+  color: #fff;
+  font-weight: 900;
+}
+
 /* =========================================================
    Waiting list scroll
    ========================================================= */
@@ -700,7 +720,7 @@ button:disabled {
 
 .wheel-window {
   position: relative;
-  height: 160px;
+  height: 160px; /*Må matche med konstanten WHEEL_WINDOW_H i round.ts*/
   border-radius: 14px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -725,7 +745,6 @@ button:disabled {
   z-index: 1;
   overflow: hidden;
 
-  /* viktige: IKKE center – vi vil ha reel som starter “oppe” */
   display: block;
 }
 

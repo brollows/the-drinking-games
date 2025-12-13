@@ -1,3 +1,4 @@
+// round.ts
 import { Component, OnInit, ChangeDetectorRef, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -91,6 +92,22 @@ export class RoundComponent implements OnInit, OnDestroy {
   // wheel layout constants
   private readonly WHEEL_ITEM_H = 42; // må matche CSS-ish høyde på item
   private readonly WHEEL_VISIBLE_CENTER_OFFSET = 2; // marker er midt i window, vi aligner ca. midt på item
+  private readonly WHEEL_WINDOW_H = 160; // må matche CSS .wheel-window height
+
+  // ✅ REFLECT UI state
+  reflectAvailable = false;
+  reflectorPlayer: Player | null = null;
+
+  // ✅ hvilken effect-index (0-basert) reflect-kortet ligger på i allEffectCards
+  private reflectEffectIndex: number | null = null;
+
+  get reflectUiReady(): boolean {
+    if (!this.reflectAvailable) return false;
+    if (this.reflectEffectIndex === null) return false;
+
+    // reflect-kortet er "klart" først når det er revealed
+    return this.effectRevealCount > this.reflectEffectIndex;
+  }
 
   constructor(
     private route: ActivatedRoute,
@@ -154,6 +171,10 @@ export class RoundComponent implements OnInit, OnDestroy {
 
   get isRandomPendingAttack(): boolean {
     return this.isCardRandom(this.pendingAttackCard);
+  }
+
+  get isReflectPendingAttack(): boolean {
+    return !!this.roundState?.pendingAttackIsReflect;
   }
 
   private async refreshState() {
@@ -223,6 +244,7 @@ export class RoundComponent implements OnInit, OnDestroy {
       this.lastPlayedCard = null;
       this.lastPlayedBy = null;
       this.lastPlayedTarget = null;
+      this.reflectorPlayer = null;
       return;
     }
 
@@ -238,6 +260,13 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     this.lastPlayedBy = this.players.find((p) => p.id === rs.lastFromPlayerId) ?? null;
     this.lastPlayedTarget = this.players.find((p) => p.id === rs.lastToPlayerId) ?? null;
+
+    // ✅ hvis reflect: lastToPlayerId er original target (den som reflectet)
+    if (rs.pendingAttackIsReflect) {
+      this.reflectorPlayer = this.players.find((p) => p.id === rs.lastToPlayerId) ?? null;
+    } else {
+      this.reflectorPlayer = null;
+    }
   }
 
   private updateViewStateFromRoundState() {
@@ -408,7 +437,11 @@ export class RoundComponent implements OnInit, OnDestroy {
     if (!this.canConfirmDrank) return;
 
     try {
-      const total = this.pendingAttackTotalDrinks ?? this.pendingAttackCard?.drinkAmount ?? 0;
+      const total =
+        this.roundState?.pendingAttackIsReflect && this.roundState?.pendingAttackFixedTotal != null
+          ? this.roundState.pendingAttackFixedTotal
+          : this.pendingAttackTotalDrinks ?? this.pendingAttackCard?.drinkAmount ?? 0;
+
       const effectIdsToDelete = [...this.usedEffectIds];
 
       await this.gameSession.resolveAttackClientSide(sessionId, me.id, total, effectIdsToDelete);
@@ -416,6 +449,44 @@ export class RoundComponent implements OnInit, OnDestroy {
       this.usedEffectIds = [];
     } catch (e) {
       console.error('Feil ved resolveAttackClientSide:', e);
+    }
+  }
+
+  async onConfirmReflect() {
+    if (this.isBtnLocked('confirmReflect')) return;
+    this.lockBtn('confirmReflect', 1000);
+
+    const rs = this.roundState;
+    const me = this.me;
+    const sessionId = this.sessionId;
+
+    if (!rs || !me || !sessionId) return;
+    if (!rs.pendingAttack || rs.pendingAttackIsReflect) return;
+
+    // ✅ reflect må være "klar" (revealed) før man kan trykke
+    if (!this.reflectUiReady) return;
+
+    try {
+      const fixedTotal = Math.max(0, this.pendingAttackTotalDrinks ?? 0);
+      const attackerId = rs.pendingAttackFromPlayerId;
+
+      if (!attackerId) return;
+
+      const effectIdsToDelete = [...this.usedEffectIds];
+
+      await this.gameSession.reflectPendingAttack(
+        sessionId,
+        me.id,
+        attackerId,
+        fixedTotal,
+        effectIdsToDelete
+      );
+
+      this.usedEffectIds = [];
+      this.reflectAvailable = false;
+      this.reflectEffectIndex = null;
+    } catch (e) {
+      console.error('Feil ved reflectPendingAttack:', e);
     }
   }
 
@@ -479,6 +550,10 @@ export class RoundComponent implements OnInit, OnDestroy {
     const rs = this.roundState;
     const sessionId = this.sessionId;
 
+    // reset reflect UI (re-settes hvis reflect finnes i dette angrepet)
+    this.reflectAvailable = false;
+    this.reflectEffectIndex = null;
+
     if (
       !rs ||
       !sessionId ||
@@ -491,6 +566,8 @@ export class RoundComponent implements OnInit, OnDestroy {
       this.attackSequenceCards = [];
       this.pendingAttackTotalDrinks = null;
       this.pendingAttackTarget = null;
+      this.reflectAvailable = false;
+      this.reflectEffectIndex = null;
 
       // reset anim state
       this.animState = 'idle';
@@ -542,6 +619,23 @@ export class RoundComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // ✅ hvis angrepet allerede er reflectet -> lås total fra DB og ikke bruk target-effects
+    if (rs.pendingAttackIsReflect && rs.pendingAttackFixedTotal != null) {
+      this.pendingAttackEffects = [];
+      this.attackSequenceCards = [this.pendingAttackCard];
+      this.pendingAttackTotalDrinks = Math.max(0, rs.pendingAttackFixedTotal);
+      this.displayPendingTotal = this.pendingAttackTotalDrinks;
+
+      // slå av effect anim
+      this.usedEffectIds = [];
+      this.expectedEffectCount = 0;
+      this.effectDotArray = [];
+      this.effectRevealCount = 0;
+      this.animState = 'done';
+      this.stopAttackAnimation();
+      return;
+    }
+
     // ellers: hent effekter på target
     try {
       this.pendingAttackEffects = await this.gameSession.getPlayerEffectsForSession(
@@ -552,6 +646,9 @@ export class RoundComponent implements OnInit, OnDestroy {
       console.error('Feil ved henting av pendingAttackEffects:', e);
       this.pendingAttackEffects = [];
     }
+
+    // ✅ viktig: reset usedEffectIds for denne beregningen (polling ellers gir stale)
+    this.usedEffectIds = [];
 
     const curseCards: Card[] = this.pendingAttackEffects
       .filter((e) => e.effectType === 'curse')
@@ -592,72 +689,96 @@ export class RoundComponent implements OnInit, OnDestroy {
       (a, b) => getPriority(a, defencePriority) - getPriority(b, defencePriority)
     );
 
-    this.attackSequenceCards = [this.pendingAttackCard, ...sortedCurse, ...sortedDefence];
+    const fullSeq = [this.pendingAttackCard, ...sortedCurse, ...sortedDefence];
 
     // ---------------- EFFECT RESOLUTION ----------------
     let total = 0;
     let baseSet = false;
 
-    for (const card of this.attackSequenceCards) {
-      if (baseSet && total === 0) break;
-
-      switch (card.type) {
-        case 'attack': {
-          total = card.drinkAmount;
-          baseSet = true;
-          break;
-        }
-
-        case 'curse': {
-          if (!baseSet) break;
-
-          let used = false;
-          for (const passive of card.passive ?? []) {
-            if (passive === 'increase') {
-              total += card.drinkAmount;
-              used = true;
-            }
-            if (passive === 'double') {
-              total *= 2;
-              used = true;
-            }
-            if (total === 0) break;
-          }
-          if (used) this.markEffectUsedForCard(card, 'curse');
-          break;
-        }
-
-        case 'defence': {
-          if (!baseSet) break;
-
-          let used = false;
-          let reflectTriggered = false;
-
-          for (const passive of card.passive ?? []) {
-            if (passive === 'reflect') {
-              total = 0;
-              used = true;
-              reflectTriggered = true;
-            }
-            if (passive === 'shield') {
-              total = 0;
-              used = true;
-            }
-            if (passive === 'reduce') {
-              total = Math.max(0, total - card.drinkAmount);
-              used = true;
-            }
-            if (passive === 'half') {
-              total = Math.ceil(total / 2);
-              used = true;
-            }
-            if (reflectTriggered || total === 0) break;
-          }
-
-          if (used) this.markEffectUsedForCard(card, 'defence');
-          break;
-        }
+    // først: apply attack + curses
+    for (const card of fullSeq) {
+      if (card.type === 'attack') {
+        total = card.drinkAmount;
+        baseSet = true;
+        continue;
       }
+
+      if (card.type === 'curse') {
+        if (!baseSet) continue;
+
+        let used = false;
+        for (const passive of card.passive ?? []) {
+          if (passive === 'increase') {
+            total += card.drinkAmount;
+            used = true;
+          }
+          if (passive === 'double') {
+            total *= 2;
+            used = true;
+          }
+          if (total === 0) break;
+        }
+        if (used) this.markEffectUsedForCard(card, 'curse');
+      }
+    }
+
+    // så: defence – MEN reflect skal IKKE auto-trigge; den blir en knapp
+    for (const card of sortedDefence) {
+      if (!baseSet) break;
+      if (total === 0) break;
+
+      const passives = card.passive ?? [];
+
+      if (passives.includes('reflect')) {
+        // ✅ ikke set total=0 – reflect er nå en manuell beslutning
+        this.reflectAvailable = true;
+        this.markEffectUsedForCard(card, 'defence');
+        // stopp videre defence: reflect "vinner"
+        break;
+      }
+
+      let used = false;
+
+      for (const passive of passives) {
+        if (passive === 'shield') {
+          total = 0;
+          used = true;
+        }
+        if (passive === 'reduce') {
+          total = Math.max(0, total - card.drinkAmount);
+          used = true;
+        }
+        if (passive === 'half') {
+          total = Math.ceil(total / 2);
+          used = true;
+        }
+        if (total === 0) break;
+      }
+
+      if (used) this.markEffectUsedForCard(card, 'defence');
+    }
+
+    // ✅ for visuals: hvis reflectAvailable, kutt sekvensen slik at vi ikke viser defences etter reflect
+    if (this.reflectAvailable) {
+      const reflectIdx = fullSeq.findIndex(
+        (c) => c.type === 'defence' && (c.passive ?? []).includes('reflect')
+      );
+      if (reflectIdx >= 0) {
+        this.attackSequenceCards = fullSeq.slice(0, reflectIdx + 1);
+      } else {
+        this.attackSequenceCards = fullSeq;
+      }
+    } else {
+      this.attackSequenceCards = fullSeq;
+    }
+
+    // ✅ finn posisjonen til reflect i effect-lista (0-basert i allEffectCards)
+    if (this.reflectAvailable) {
+      const effectsOnly = this.attackSequenceCards.slice(1);
+      const idx = effectsOnly.findIndex(
+        (c) => c.type === 'defence' && (c.passive ?? []).includes('reflect')
+      );
+      this.reflectEffectIndex = idx >= 0 ? idx : null;
     }
 
     this.pendingAttackTotalDrinks = Math.max(0, total);
@@ -696,6 +817,18 @@ export class RoundComponent implements OnInit, OnDestroy {
 
   get canConfirmDrank(): boolean {
     if (this.viewState !== 'drinking') return true;
+
+    // ✅ hvis reflect er tilgjengelig og er REVEALED: må trykke reflect først
+    if (this.reflectUiReady && !this.isReflectPendingAttack) return false;
+
+    if (this.expectedEffectCount <= 0) return true;
+    return this.animState === 'done';
+  }
+
+  get canConfirmReflect(): boolean {
+    if (this.viewState !== 'drinking') return false;
+    if (!this.reflectUiReady) return false;
+    if (this.isReflectPendingAttack) return false;
     if (this.expectedEffectCount <= 0) return true;
     return this.animState === 'done';
   }
@@ -745,17 +878,18 @@ export class RoundComponent implements OnInit, OnDestroy {
 
         case 'defence': {
           if (!baseSet) break;
-          let reflect = false;
+          // ✅ reflect endrer ikke total i animasjonen (manuell knapp)
+          const passives = card.passive ?? [];
+          if (passives.includes('reflect')) {
+            // behold total, bare push
+            break;
+          }
 
-          for (const p of card.passive ?? []) {
-            if (p === 'reflect') {
-              total = 0;
-              reflect = true;
-            }
+          for (const p of passives) {
             if (p === 'shield') total = 0;
             if (p === 'reduce') total = Math.max(0, total - card.drinkAmount);
             if (p === 'half') total = Math.ceil(total / 2);
-            if (reflect || total === 0) break;
+            if (total === 0) break;
           }
           break;
         }
@@ -778,7 +912,7 @@ export class RoundComponent implements OnInit, OnDestroy {
       const rot = Math.floor(Math.random() * 51) - 25; // -25..25
       this.effectRotations.push(`${rot}deg`);
 
-      const from = Math.random() < 0.5 ? '-110px' : '110px';
+      const from = Math.random() < 0.5 ? '-140vw' : '140vw';
       this.effectFrom.push(from);
     }
   }
@@ -816,6 +950,17 @@ export class RoundComponent implements OnInit, OnDestroy {
       this.effectDotArray = [];
       this.effectRevealCount = 0;
       this.displayPendingTotal = this.pendingAttackCard?.drinkAmount ?? this.displayPendingTotal;
+      return;
+    }
+
+    // ✅ reflect-locked: ingen effects anim
+    if (rs.pendingAttackIsReflect && rs.pendingAttackFixedTotal != null) {
+      this.stopAttackAnimation();
+      this.animState = 'done';
+      this.expectedEffectCount = 0;
+      this.effectDotArray = [];
+      this.effectRevealCount = 0;
+      this.displayPendingTotal = rs.pendingAttackFixedTotal;
       return;
     }
 
@@ -980,40 +1125,39 @@ export class RoundComponent implements OnInit, OnDestroy {
     const rs = this.roundState;
 
     if (!rs || !rs.pendingAttack || !this.isRandomPendingAttack) {
-      // hvis angrep ikke er random/pending -> reset
       if (this.randomOverlayVisible || this.randomPhase !== 'idle') {
         this.resetRandomOverlay();
       }
       return;
     }
 
-    // key basert på hvem som spiller og hvem som er winner (winner er synced via DB)
     const key = `${rs.pendingAttackCardId}|${rs.pendingAttackFromPlayerId}|${rs.pendingAttackToPlayerId}`;
-    if (this.randomKey === key) return; // allerede startet
+    if (this.randomKey === key) return;
 
     this.randomKey = key;
 
-    // bygg “alive list” (visuelt)
     const alive = this.players.filter((p) => p.lives > 0);
-    const baseList = alive.length ? alive : [...this.players];
+    const baseList = [...alive].sort((a, b) => a.id.localeCompare(b.id));
 
-    // winner (synced)
     this.randomWheelWinner = this.pendingAttackTarget ?? null;
 
-    // overlay inn
     this.randomOverlayVisible = true;
     this.randomOverlayHiding = false;
     this.randomPhase = 'countdown';
     this.randomCountdown = 5;
 
-    // init reel items (mange repetisjoner så vi kan spinne langt)
+    console.log('[RANDOM]', {
+      me: this.me?.id,
+      baseList: baseList.map((p) => p.id),
+      winner: this.randomWheelWinner?.id,
+      rsTo: this.roundState?.pendingAttackToPlayerId,
+    });
+
     this.buildWheelReel(baseList, this.randomWheelWinner);
 
-    // hold wheel i startposisjon under countdown
     this.wheelTransition = 'none';
     this.wheelTransform = 'translateY(0px)';
 
-    // countdown 5 sek
     this.stopRandomTimers();
     this.randomCountdownTimer = setInterval(() => {
       this.randomCountdown = Math.max(0, this.randomCountdown - 1);
@@ -1025,52 +1169,42 @@ export class RoundComponent implements OnInit, OnDestroy {
         if (this.randomCountdownTimer) clearInterval(this.randomCountdownTimer);
         this.randomCountdownTimer = null;
 
-        // start spin
         this.startWheelSpinToWinner();
       }
     }, 1000);
 
-    // forcing waiting-view under overlay
     this.updateViewStateFromRoundState();
   }
 
   private buildWheelReel(baseList: Player[], winner: Player | null) {
-    // Buffer før/etter så vi aldri havner i “tomt område”
-    const bufferCycles = 6; // ekstra runder før og etter
-    const mainCycles = 24; // selve “massen” vi spinner gjennom
+    const bufferCycles = 6;
+    const mainCycles = 24;
     const totalCycles = bufferCycles + mainCycles + bufferCycles;
 
     const reel: Player[] = [];
 
-    // bygg opp med mange repetisjoner
     for (let i = 0; i < totalCycles; i++) {
       reel.push(...baseList);
     }
 
-    // winner (fallback)
     const winnerId = winner?.id ?? baseList[0]?.id ?? null;
 
     let winnerIdxInBase = baseList.findIndex((p) => p.id === winnerId);
     if (winnerIdxInBase < 0) winnerIdxInBase = 0;
 
-    // land i en av de siste main-cycles, men med buffer etter (så vi ikke “går tomme”)
-    const landingCycle = bufferCycles + (mainCycles - 3); // <- ikke helt på slutten
+    const landingCycle = bufferCycles + (mainCycles - 3);
     const landingBase = landingCycle * baseList.length;
 
-    // liten deterministisk “nudge” så det ikke ser likt ut hver gang
-    const deterministicNudge = (winnerIdxInBase * 7 + baseList.length * 3) % baseList.length;
-    const landingIndex = landingBase + ((winnerIdxInBase + deterministicNudge) % baseList.length);
+    const landingIndex = landingBase + winnerIdxInBase;
 
     this.wheelReelItems = reel;
 
-    // start litt “inni” listen (midt i buffer) så vi har plenty items over marker også
     const startIndex = bufferCycles * baseList.length;
     // @ts-ignore
     this._wheelStartIndex = startIndex;
     // @ts-ignore
     this._wheelLandingIndex = landingIndex;
 
-    // sett startposisjon i “countdown”
     const startY = startIndex * this.WHEEL_ITEM_H;
     this.wheelTransition = 'none';
     this.wheelTransform = `translateY(-${startY}px)`;
@@ -1089,21 +1223,15 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     this.randomPhase = 'spinning';
 
-    // vi vil at strip’en flytter seg opp (negativ Y) til landingIndex
-    // marker ligger i midten av window. vi aligner approx midt på item.
     const landingIndex = this._wheelLandingIndex ?? 0;
     const startIndex = this._wheelStartIndex ?? 0;
 
-    // marker ligger midt i vinduet – litt center-justering
-    const centerAdjust = this.WHEEL_ITEM_H / this.WHEEL_VISIBLE_CENTER_OFFSET;
-
-    // startpos (samme som countdown satte)
     const startY = startIndex * this.WHEEL_ITEM_H;
     this.wheelTransition = 'none';
     this.wheelTransform = `translateY(-${startY}px)`;
 
-    // sluttpos
-    const finalY = landingIndex * this.WHEEL_ITEM_H + centerAdjust;
+    const finalY =
+      landingIndex * this.WHEEL_ITEM_H + this.WHEEL_ITEM_H / 2 - this.WHEEL_WINDOW_H / 2;
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -1115,12 +1243,10 @@ export class RoundComponent implements OnInit, OnDestroy {
       });
     });
 
-    // after 10s: done + fade out 0.5s
     this.randomSpinTimer = setTimeout(() => {
       this.randomSpinTimer = null;
       this.randomPhase = 'done';
 
-      // fade out (0.5s)
       this.randomOverlayHiding = true;
 
       this.randomFadeTimer = setTimeout(() => {
@@ -1128,7 +1254,6 @@ export class RoundComponent implements OnInit, OnDestroy {
         this.randomOverlayVisible = false;
         this.randomOverlayHiding = false;
 
-        // ✅ når overlay er ferdig: nå får target gå til drinking view
         this.updateViewStateFromRoundState();
 
         try {

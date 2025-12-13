@@ -1,3 +1,4 @@
+<!-- round.html -->
 <section
   class="round-wrapper"
   [class.is-my-turn]="viewState === 'playing' || viewState === 'drinking'"
@@ -47,7 +48,6 @@
 
       <!-- wheel -->
       <div class="wheel-shell" [class.is-shown]="randomPhase !== 'idle'">
-        <div class="wheel-title" *ngIf="randomPhase === 'countdown'">Hjulet fader inn…</div>
         <div class="wheel-title" *ngIf="randomPhase === 'spinning'">Spinning… 🎠</div>
         <div class="wheel-title" *ngIf="randomPhase === 'done' && randomWheelWinner">
           Landet på <strong>{{ randomWheelWinner.name }}</strong> 🍻
@@ -68,10 +68,6 @@
               </div>
             </div>
           </div>
-        </div>
-
-        <div class="wheel-hint" *ngIf="randomPhase === 'countdown'">
-          (Felles winner for alle skjermer)
         </div>
       </div>
     </div>
@@ -288,8 +284,21 @@
 
       <ng-container *ngTemplateOutlet="pendingAttackBlock"></ng-container>
 
+      <!-- ✅ REFLECT BUTTON (skjules helt til reflect-kortet er revealed) -->
+      <button
+        class="btn danger"
+        *ngIf="reflectUiReady && !roundState?.pendingAttackIsReflect"
+        (click)="onConfirmReflect()"
+        [disabled]="isBtnLocked('confirmReflect') || !canConfirmReflect"
+        style="margin-top: 1.5rem"
+      >
+        🔁 Reflect kort tilbake
+      </button>
+
+      <!-- ✅ IKKE vis “Jeg har drukket” når reflect er klar og ikke allerede reflectet -->
       <button
         class="btn primary"
+        *ngIf="!(reflectUiReady && !roundState?.pendingAttackIsReflect)"
         (click)="onConfirmDrank()"
         [disabled]="isBtnLocked('confirmDrank') || !canConfirmDrank"
         style="margin-top: 1.5rem"
@@ -299,6 +308,10 @@
 
       <p class="confirm-hint" *ngIf="!canConfirmDrank && expectedEffectCount > 0">
         Venter på effekter... ({{ effectRevealCount }}/{{ expectedEffectCount }})
+      </p>
+
+      <p class="confirm-hint" *ngIf="reflectUiReady && !roundState?.pendingAttackIsReflect">
+        Trykk reflect for å sende kortet tilbake 🔁
       </p>
     </div>
   </section>
@@ -344,11 +357,26 @@
       PENDING ATTACK TEMPLATE (shared)
 ========================= -->
 <ng-template #pendingAttackBlock>
-  <p class="subtitle" *ngIf="lastPlayedBy && pendingAttackCard">
-    <strong>{{ lastPlayedBy.name }}</strong>
-    sendte dette kortet til
-    <strong>{{ pendingAttackTarget?.name || 'en spiller' }}</strong> 🍻
-  </p>
+  <!-- ✅ Reflect messaging -->
+  <ng-container *ngIf="roundState?.pendingAttackIsReflect; else normalAttackText">
+    <p class="subtitle" *ngIf="pendingAttackCard && pendingAttackTarget">
+      <strong>{{ reflectorPlayer?.name || 'Noen' }}</strong>
+      reflectet kortet tilbake til
+      <strong>{{ pendingAttackTarget.name }}</strong> 🔁
+      <span *ngIf="lastPlayedBy">
+        (opprinnelig angrep fra <strong>{{ lastPlayedBy.name }}</strong
+        >)</span
+      >
+    </p>
+  </ng-container>
+
+  <ng-template #normalAttackText>
+    <p class="subtitle" *ngIf="lastPlayedBy && pendingAttackCard">
+      <strong>{{ lastPlayedBy.name }}</strong>
+      sendte dette kortet til
+      <strong>{{ pendingAttackTarget?.name || 'en spiller' }}</strong> 🍻
+    </p>
+  </ng-template>
 
   <div class="waiting-attack-wrapper" *ngIf="pendingAttackCard">
     <button
@@ -400,10 +428,28 @@
     </div>
   </div>
 
-  <p class="total-drinks" *ngIf="pendingAttackCard && pendingAttackTarget">
-    {{ pendingAttackTarget.name }} må drikke
-    {{ displayPendingTotal }}
-    slurk{{ displayPendingTotal === 1 ? '' : 'er' }}.
+  <!-- ✅ Total line: reflect-aware -->
+  <p class="total-drinks" *ngIf="pendingAttackCard">
+    <ng-container *ngIf="roundState?.pendingAttackIsReflect; else notReflectedLine">
+      {{ pendingAttackTarget?.name }} må drikke
+      {{ displayPendingTotal }}
+      slurk{{ displayPendingTotal === 1 ? '' : 'er' }}.
+    </ng-container>
+
+    <ng-template #notReflectedLine>
+      <!-- ✅ skjul reflect hint til reflect-kortet er revealed -->
+      <ng-container *ngIf="reflectUiReady; else normalDrinkLine">
+        🔁 Reflect klar! Send {{ displayPendingTotal }} slurk tilbake til
+        <strong>{{ lastPlayedBy?.name }}</strong
+        >.
+      </ng-container>
+
+      <ng-template #normalDrinkLine>
+        {{ pendingAttackTarget?.name }} må drikke
+        {{ displayPendingTotal }}
+        slurk{{ displayPendingTotal === 1 ? '' : 'er' }}.
+      </ng-template>
+    </ng-template>
   </p>
 
   <p class="calc-details" *ngIf="pendingAttackCard">

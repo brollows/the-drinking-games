@@ -21,7 +21,7 @@ export interface Player {
 
 export interface RoundState {
   sessionId: string;
-  turnOrder: string[]; // array med player.id
+  turnOrder: string[];
   currentTurnIndex: number;
 
   lastCardId: string | null;
@@ -33,6 +33,10 @@ export interface RoundState {
   pendingAttackCardId: string | null;
   pendingAttackFromPlayerId: string | null;
   pendingAttackToPlayerId: string | null;
+
+  // ✅ NEW (reflect support)
+  pendingAttackFixedTotal?: number | null;
+  pendingAttackIsReflect?: boolean;
 }
 
 export interface PlayerEffect {
@@ -321,6 +325,8 @@ export class GameSessionService {
       pendingAttackCardId: data.pending_attack_card_id,
       pendingAttackFromPlayerId: data.pending_attack_from_player_id,
       pendingAttackToPlayerId: data.pending_attack_to_player_id,
+      pendingAttackFixedTotal: data.pending_attack_fixed_total,
+      pendingAttackIsReflect: data.pending_attack_is_reflect,
     };
   }
 
@@ -341,6 +347,10 @@ export class GameSessionService {
         last_card_type: 'attack',
         last_from_player_id: fromPlayerId,
         last_to_player_id: toPlayerId,
+
+        // ✅ reset reflect fields for new attack
+        pending_attack_fixed_total: null,
+        pending_attack_is_reflect: false,
       })
       .eq('session_id', sessionId);
 
@@ -413,8 +423,6 @@ export class GameSessionService {
     }
   }
 
-  // game-session.service.ts
-
   async advanceTurn(sessionId: string): Promise<void> {
     const roundState = await this.getRoundState(sessionId);
     if (!roundState) {
@@ -479,7 +487,6 @@ export class GameSessionService {
     totalDrinks: number,
     usedEffectIds: string[]
   ): Promise<void> {
-    // Hent round_state for å verifisere at det faktisk er et aktivt angrep
     const roundState = await this.getRoundState(sessionId);
     if (!roundState || !roundState.pendingAttack || !roundState.pendingAttackCardId) {
       throw new Error('Ingen aktivt angrep å resolvere (client-side).');
@@ -489,12 +496,17 @@ export class GameSessionService {
       throw new Error('Dette angrepet er ikke på denne spilleren.');
     }
 
-    // Clamp totalDrinks
-    if (totalDrinks < 0) {
-      totalDrinks = 0;
+    // ✅ hvis reflect: bruk DB-låst total (ikke hva klienten sender inn)
+    if (
+      roundState.pendingAttackIsReflect &&
+      roundState.pendingAttackFixedTotal !== null &&
+      roundState.pendingAttackFixedTotal !== undefined
+    ) {
+      totalDrinks = roundState.pendingAttackFixedTotal;
     }
 
-    // Hent target player
+    if (totalDrinks < 0) totalDrinks = 0;
+
     const { data: target, error: targetError } = await this.supabase.client
       .from('players')
       .select('*')
@@ -518,7 +530,6 @@ export class GameSessionService {
       throw livesError;
     }
 
-    // Slett kun effektene som faktisk ble brukt i denne drinking-sekvensen
     if (usedEffectIds && usedEffectIds.length > 0) {
       const { error: delError } = await this.supabase.client
         .from('player_effects')
@@ -527,12 +538,9 @@ export class GameSessionService {
 
       if (delError) {
         console.error('Feil ved sletting av brukte player_effects (client-side):', delError);
-        // Ikke throw her nødvendigvis – lives er allerede oppdatert,
-        // men du kan velge å kaste feil om du vil gjøre det hardt.
       }
     }
 
-    // Beregn neste spiller
     const nextIndex =
       roundState.turnOrder.length === 0
         ? 0
@@ -545,6 +553,10 @@ export class GameSessionService {
         pending_attack_card_id: null,
         pending_attack_from_player_id: null,
         pending_attack_to_player_id: null,
+
+        pending_attack_fixed_total: null,
+        pending_attack_is_reflect: false,
+
         current_turn_index: nextIndex,
       })
       .eq('session_id', sessionId);
@@ -567,6 +579,63 @@ export class GameSessionService {
     if (error) {
       console.error('Feil ved removePlayerEffects:', error);
       throw error;
+    }
+  }
+
+  async reflectPendingAttack(
+    sessionId: string,
+    originalTargetId: string,
+    attackerId: string,
+    fixedTotal: number,
+    usedEffectIds: string[]
+  ): Promise<void> {
+    const rs = await this.getRoundState(sessionId);
+
+    if (!rs || !rs.pendingAttack || !rs.pendingAttackCardId) {
+      throw new Error('Ingen aktivt angrep å reflecte.');
+    }
+
+    // ✅ guard: ikke allow dobbelt reflect
+    if (rs.pendingAttackIsReflect) {
+      throw new Error('Angrepet er allerede reflectet.');
+    }
+
+    if (rs.pendingAttackToPlayerId !== originalTargetId) {
+      throw new Error('Dette angrepet er ikke på denne spilleren (reflect).');
+    }
+
+    if (!rs.pendingAttackFromPlayerId || rs.pendingAttackFromPlayerId !== attackerId) {
+      throw new Error('Angriper matcher ikke round_state (reflect).');
+    }
+
+    if (fixedTotal < 0) fixedTotal = 0;
+
+    if (usedEffectIds && usedEffectIds.length > 0) {
+      const { error: delError } = await this.supabase.client
+        .from('player_effects')
+        .delete()
+        .in('id', usedEffectIds);
+
+      if (delError) {
+        console.error('Feil ved sletting av brukte effects (reflect):', delError);
+        throw delError;
+      }
+    }
+
+    const { error: rsError } = await this.supabase.client
+      .from('round_state')
+      .update({
+        pending_attack: true,
+        pending_attack_to_player_id: attackerId,
+
+        pending_attack_fixed_total: fixedTotal,
+        pending_attack_is_reflect: true,
+      })
+      .eq('session_id', sessionId);
+
+    if (rsError) {
+      console.error('Feil ved oppdatering av round_state (reflect):', rsError);
+      throw rsError;
     }
   }
 }
