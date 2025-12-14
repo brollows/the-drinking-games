@@ -11,6 +11,8 @@ export type PassiveType =
   | 'random' // tilfeldig spiller får effekten
   | 'none'; // ingen passiv effekt
 
+//TODO: Legg til en attack-passive der alle får slurk!
+
 export interface Card {
   id: string;
   type: CardType;
