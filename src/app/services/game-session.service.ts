@@ -8,6 +8,7 @@ export interface GameSession {
   hostName: string;
   createdAt: string;
   phase: string;
+  startLives: number;
 }
 
 export interface Player {
@@ -91,6 +92,7 @@ export class GameSessionService {
       hostName: session.host_name,
       createdAt: session.created_at,
       phase: session.phase,
+      startLives: session.start_lives ?? START_LIVES,
     };
 
     this._currentSession = newSession;
@@ -102,7 +104,7 @@ export class GameSessionService {
         name: hostName,
         is_host: true,
         session_id: session.id,
-        lives: START_LIVES,
+        lives: this._currentSession?.startLives ?? START_LIVES,
       })
       .select()
       .single();
@@ -170,6 +172,7 @@ export class GameSessionService {
       hostName: session.host_name,
       createdAt: session.created_at,
       phase: session.phase,
+      startLives: session.start_lives ?? START_LIVES,
     };
 
     this._currentSession = joinedSession;
@@ -181,7 +184,7 @@ export class GameSessionService {
         name: trimmedName,
         is_host: false,
         session_id: session.id,
-        lives: START_LIVES,
+        lives: this._currentSession?.startLives ?? START_LIVES,
       })
       .select()
       .single();
@@ -272,6 +275,7 @@ export class GameSessionService {
       hostName: data.host_name,
       createdAt: data.created_at,
       phase: data.phase,
+      startLives: data.start_lives ?? START_LIVES,
     };
 
     this._currentSession = sess;
@@ -636,6 +640,38 @@ export class GameSessionService {
     if (rsError) {
       console.error('Feil ved oppdatering av round_state (reflect):', rsError);
       throw rsError;
+    }
+  }
+
+  async setStartLives(sessionId: string, startLives: number): Promise<void> {
+    const { error } = await this.supabase.client
+      .from('game_sessions')
+      .update({ start_lives: startLives })
+      .eq('id', sessionId);
+
+    if (error) {
+      console.error('Feil ved oppdatering av start_lives:', error);
+      throw error;
+    }
+
+    if (this._currentSession?.id === sessionId) {
+      this._currentSession = { ...this._currentSession, startLives };
+    }
+  }
+  async applyStartLivesToPlayers(sessionId: string): Promise<void> {
+    // 1) hent start_lives for session
+    const session = await this.fetchSessionById(sessionId);
+    const startLives = session?.startLives ?? 40;
+
+    // 2) sett lives for alle players i sessionen
+    const { error } = await this.supabase.client
+      .from('players')
+      .update({ lives: startLives })
+      .eq('session_id', sessionId);
+
+    if (error) {
+      console.error('Feil ved applyStartLivesToPlayers:', error);
+      throw error;
     }
   }
 }

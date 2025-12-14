@@ -3,11 +3,12 @@ import { CommonModule } from '@angular/common';
 import { GameSession, GameSessionService, Player } from '../../services/game-session.service';
 import { PlayerService } from '../../services/player.service';
 import { Router } from '@angular/router';
+import { FormsModule } from '@angular/forms';
 
 @Component({
   selector: 'app-play',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   templateUrl: './play.html',
   styleUrl: './play.css',
 })
@@ -101,19 +102,54 @@ export class PlayComponent implements OnInit, OnDestroy {
   }
 
   async onStartRound() {
-    if (!this.session) {
+    if (!this.session || this.showSettingsModal) {
       return;
     }
 
     try {
       // Oppdater state i databasen – dette er signalet til alle andre
       await this.gameSession.setSessionPhase(this.session.id, 'round');
+      await this.gameSession.applyStartLivesToPlayers(this.session.id);
       await this.gameSession.startRound(this.session.id);
 
       // Host går direkte til round-siden
       await this.router.navigate(['/round', this.session.id]);
     } catch (e) {
       console.error('Kunne ikke starte runde:', e);
+    }
+  }
+
+  showSettingsModal = false;
+
+  startLivesDraft: number = 40; // default fallback
+  startLivesMin = 1;
+  startLivesMax = 200;
+
+  openSettingsModal() {
+    // ta verdi fra session hvis den finnes
+    this.startLivesDraft = this.session?.startLives ?? 40;
+    this.showSettingsModal = true;
+  }
+
+  closeSettingsModal() {
+    this.showSettingsModal = false;
+  }
+
+  async saveSettings() {
+    if (!this.session) return;
+
+    const v = Math.max(
+      this.startLivesMin,
+      Math.min(this.startLivesMax, Number(this.startLivesDraft) || 40)
+    );
+
+    try {
+      await this.gameSession.setStartLives(this.session.id, v);
+      // refresh local session
+      this.session = await this.gameSession.fetchSessionById(this.session.id);
+      this.showSettingsModal = false;
+    } catch (e) {
+      console.error('Kunne ikke lagre settings:', e);
     }
   }
 }

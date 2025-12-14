@@ -6,15 +6,16 @@
   <div class="join-code">
     {{ getSessionCode() }}
   </div>
-
-  <button
-    class="btn primary"
+  <div
     *ngIf="playerName === session?.hostName"
-    (click)="onStartRound()"
-    style="margin-top: 1rem"
+    style="display: flex; gap: 0.6rem; justify-content: center; margin-top: 1rem"
   >
-    Start spill
-  </button>
+    <button class="btn secondary" type="button" (click)="openSettingsModal()">
+      ⚙️ Innstillinger
+    </button>
+
+    <button class="btn primary" type="button" (click)="onStartRound()">Start spill</button>
+  </div>
 
   <hr style="margin: 1.5rem 0; opacity: 0.4" />
 
@@ -35,3 +36,31 @@
     </ul>
   </div>
 </section>
+
+<!-- SETTINGS MODAL -->
+<div class="modal-backdrop" *ngIf="showSettingsModal" (click)="closeSettingsModal()">
+  <div class="modal" (click)="$event.stopPropagation()">
+    <h3>Spillinnstillinger</h3>
+    <p class="subtitle" style="margin-top: 0.35rem">
+      Disse gjelder for alle som joiner denne runden.
+    </p>
+
+    <label class="modal-label">Start-liv (🍻)</label>
+
+    <div class="modal-row">
+      <input
+        class="modal-input"
+        type="number"
+        [min]="startLivesMin"
+        [max]="startLivesMax"
+        [(ngModel)]="startLivesDraft"
+      />
+      <div class="modal-hint">{{ startLivesMin }}–{{ startLivesMax }}</div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn secondary" type="button" (click)="closeSettingsModal()">Avbryt</button>
+      <button class="btn primary" type="button" (click)="saveSettings()">Lagre</button>
+    </div>
+  </div>
+</div>

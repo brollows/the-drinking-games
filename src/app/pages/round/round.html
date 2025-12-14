@@ -208,67 +208,79 @@
 <ng-template #waiting>
   <section class="view view-waiting">
     <div class="view-scroll">
-      <header class="view-header">
-        <h2>Venter på tur</h2>
-
-        <ng-container *ngIf="lastPlayedCard; else noLastCard">
-          <ng-container *ngIf="lastPlayedCard.type === 'attack'; else nonAttackInfo">
-            <ng-container *ngTemplateOutlet="pendingAttackBlock"></ng-container>
-          </ng-container>
-
-          <ng-template #nonAttackInfo>
-            <p class="subtitle">
-              <strong>{{ lastPlayedBy?.name }}</strong>
-              spilte et <strong>{{ getCardTypeUpper(lastPlayedCard) }}</strong
-              >-kort 🍻
-            </p>
-          </ng-template>
-        </ng-container>
-
-        <ng-template #noLastCard>
-          <p class="subtitle" *ngIf="currentTurnPlayer; else noCurrent">
-            Det er <strong>{{ currentTurnPlayer.name }}</strong> sin tur 🍻
-          </p>
-
-          <ng-template #noCurrent>
-            <p class="subtitle">Venter på at neste spiller skal velges...</p>
-          </ng-template>
-        </ng-template>
-      </header>
-
-      <hr class="divider" />
-
-      <section class="waiting-list-section">
-        <h3>Spillere i spillet</h3>
-
-        <div class="waiting-player-scroll" *ngIf="players.length; else noPlayers">
-          <ul class="waiting-player-list">
-            <li
-              *ngFor="let p of players"
-              class="waiting-player-row"
-              [class.is-current]="p.id === currentTurnPlayerId"
-            >
-              <div class="wp-main">
-                <span class="wp-name">{{ p.name }}</span>
-                <span class="wp-lives">{{ p.lives }} 🍻</span>
-              </div>
-
-              <div class="wp-meta" *ngIf="playerHasSkip[p.id]">Skipper neste tur ⏭️</div>
-              <div class="wp-meta" *ngIf="!playerHasSkip[p.id] && p.id === currentTurnPlayerId">
-                Spiller nå
-              </div>
-              <div class="wp-meta" *ngIf="!playerHasSkip[p.id] && p.id !== currentTurnPlayerId">
-                Venter på tur
-              </div>
-            </li>
-          </ul>
-        </div>
-
-        <ng-template #noPlayers>
-          <p>Ingen spillere registrert i denne sessionen 🤔</p>
-        </ng-template>
-      </section>
+      <ng-container *ngTemplateOutlet="waitingContent; context: { mode: 'waiting' }"></ng-container>
     </div>
+  </section>
+</ng-template>
+
+<!-- Shared waiting content (brukes av både waiting og lost) -->
+<ng-template #waitingContent let-mode="mode">
+  <header class="view-header">
+    <div class="lost-banner" *ngIf="mode === 'lost'">
+      <span class="lost-badge">Du er ute 😵</span>
+      <span class="lost-sub">Men du kan fortsatt følge med på alt som skjer</span>
+    </div>
+
+    <h2 *ngIf="mode !== 'lost'">Venter på tur</h2>
+    <h2 *ngIf="mode === 'lost'">Følger med</h2>
+
+    <ng-container *ngIf="lastPlayedCard; else noLastCard">
+      <ng-container *ngIf="lastPlayedCard.type === 'attack'; else nonAttackInfo">
+        <ng-container *ngTemplateOutlet="pendingAttackBlock"></ng-container>
+      </ng-container>
+
+      <ng-template #nonAttackInfo>
+        <p class="subtitle">
+          <strong>{{ lastPlayedBy?.name }}</strong>
+          spilte et <strong>{{ getCardTypeUpper(lastPlayedCard) }}</strong
+          >-kort 🍻
+        </p>
+      </ng-template>
+    </ng-container>
+
+    <ng-template #noLastCard>
+      <p class="subtitle" *ngIf="currentTurnPlayer; else noCurrent">
+        Det er <strong>{{ currentTurnPlayer.name }}</strong> sin tur 🍻
+      </p>
+
+      <ng-template #noCurrent>
+        <p class="subtitle">Venter på at neste spiller skal velges...</p>
+      </ng-template>
+    </ng-template>
+  </header>
+
+  <hr class="divider" />
+
+  <section class="waiting-list-section">
+    <h3>Spillere i spillet</h3>
+
+    <div class="waiting-player-scroll" *ngIf="players.length; else noPlayers">
+      <ul class="waiting-player-list">
+        <li
+          *ngFor="let p of players"
+          class="waiting-player-row"
+          [class.is-current]="p.id === currentTurnPlayerId"
+          [class.is-out]="p.lives <= 0"
+        >
+          <div class="wp-main">
+            <span class="wp-name">{{ p.name }}</span>
+            <span class="wp-lives">{{ p.lives }} 🍻</span>
+          </div>
+
+          <div class="wp-meta" *ngIf="playerHasSkip[p.id]">Skipper neste tur ⏭️</div>
+          <div class="wp-meta" *ngIf="!playerHasSkip[p.id] && p.id === currentTurnPlayerId">
+            Spiller nå
+          </div>
+          <div class="wp-meta" *ngIf="!playerHasSkip[p.id] && p.id !== currentTurnPlayerId">
+            Venter på tur
+          </div>
+        </li>
+      </ul>
+    </div>
+
+    <ng-template #noPlayers>
+      <p>Ingen spillere registrert i denne sessionen 🤔</p>
+    </ng-template>
   </section>
 </ng-template>
 
@@ -321,16 +333,57 @@
       LOST / FINISHED
 ========================= -->
 <ng-template #lost>
-  <section class="card">
-    <h2>Du er ute 😵</h2>
-    <p>Du kan fortsatt følge med på spillet.</p>
+  <section class="view view-lost">
+    <div class="view-scroll">
+      <ng-container *ngTemplateOutlet="waitingContent; context: { mode: 'lost' }"></ng-container>
+    </div>
   </section>
 </ng-template>
 
 <ng-template #finished>
-  <section class="card">
-    <h2>Spillet er ferdig 🎉</h2>
-    <p>Her kan vi vise hvem som vant og evt. "nytt spill".</p>
+  <section class="view view-finished">
+    <div class="view-scroll">
+      <header class="view-header">
+        <h2>Spillet er ferdig 🎉</h2>
+        <p class="subtitle">Podium (1.–3. plass)</p>
+      </header>
+
+      <div class="podium" *ngIf="podiumPlayers.length">
+        <div class="podium-slot second" *ngIf="podiumPlayers[1]">
+          <div class="podium-rank">2</div>
+          <div class="podium-name">{{ podiumPlayers[1].name }}</div>
+          <div class="podium-meta">{{ podiumPlayers[1].lives }} 🍻</div>
+        </div>
+
+        <div class="podium-slot first" *ngIf="podiumPlayers[0]">
+          <div class="podium-crown">👑</div>
+          <div class="podium-rank">1</div>
+          <div class="podium-name">{{ podiumPlayers[0].name }}</div>
+          <div class="podium-meta">{{ podiumPlayers[0].lives }} 🍻</div>
+        </div>
+
+        <div class="podium-slot third" *ngIf="podiumPlayers[2]">
+          <div class="podium-rank">3</div>
+          <div class="podium-name">{{ podiumPlayers[2].name }}</div>
+          <div class="podium-meta">{{ podiumPlayers[2].lives }} 🍻</div>
+        </div>
+      </div>
+
+      <hr class="divider" />
+
+      <section class="standings">
+        <h3>Full liste</h3>
+        <ul class="standings-list">
+          <li *ngFor="let p of standingsPlayers; let i = index" class="standings-row">
+            <span class="standings-rank">#{{ i + 1 }}</span>
+            <span class="standings-name">{{ p.name }}</span>
+            <span class="standings-lives">{{ p.lives }} 🍻</span>
+          </li>
+        </ul>
+      </section>
+
+      <button class="btn secondary" type="button" (click)="goHome()">Tilbake til start</button>
+    </div>
   </section>
 </ng-template>
 

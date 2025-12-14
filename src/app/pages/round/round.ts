@@ -26,6 +26,42 @@ export class RoundComponent implements OnInit, OnDestroy {
 
   viewState: 'playing' | 'waiting' | 'drinking' | 'lost' | 'finished' = 'waiting';
 
+  // =========================
+  // ✅ WINNING / PODIUM
+  // =========================
+  get isGameFinished(): boolean {
+    // Enkel klient-side finish: når 0 eller 1 spiller står igjen.
+    // (Vi har ikke eliminasjons-historikk i state enda, så 2./3. baseres på lives + tie-breaker.)
+    const alive = this.players.filter((p) => (p.lives ?? 0) > 0);
+    return this.players.length >= 2 && alive.length <= 1;
+  }
+
+  get podiumPlayers(): Player[] {
+    // Sorter: høyest lives først, så navn, så id (stabil tie-breaker)
+    const sorted = [...this.players].sort((a, b) => {
+      const la = a.lives ?? 0;
+      const lb = b.lives ?? 0;
+      if (lb !== la) return lb - la;
+      const n = (a.name ?? '').localeCompare(b.name ?? '');
+      if (n !== 0) return n;
+      return (a.id ?? '').localeCompare(b.id ?? '');
+    });
+
+    return sorted.slice(0, 3);
+  }
+
+  get standingsPlayers(): Player[] {
+    // Samme sortering som podium (høyest lives først)
+    return [...this.players].sort((a, b) => {
+      const la = a.lives ?? 0;
+      const lb = b.lives ?? 0;
+      if (lb !== la) return lb - la;
+      const n = (a.name ?? '').localeCompare(b.name ?? '');
+      if (n !== 0) return n;
+      return (a.id ?? '').localeCompare(b.id ?? '');
+    });
+  }
+
   hand: Card[] = [];
   selectedIndex: number | null = null;
 
@@ -149,6 +185,10 @@ export class RoundComponent implements OnInit, OnDestroy {
     this.stopRandomTimers();
   }
 
+  goHome() {
+    this.router.navigate(['/']);
+  }
+
   // =========================
   // ✅ per-button lock helpers
   // =========================
@@ -202,14 +242,29 @@ export class RoundComponent implements OnInit, OnDestroy {
         }
       }
 
+      // ✅ Hvis spillet er ferdig, vis vinnerskjerm for ALLE (også de som er ute)
+      if (this.isGameFinished) {
+        this.viewState = 'finished';
+      }
+
       if (this.currentLives !== null && this.currentLives <= 0) {
-        this.viewState = 'lost';
+        // ✅ Ikke override finished
+        if (this.viewState !== 'finished') this.viewState = 'lost';
       }
 
       if (roundState && roundState.turnOrder.length > 0) {
         this.currentTurnPlayerId = roundState.turnOrder[roundState.currentTurnIndex] ?? null;
       } else {
         this.currentTurnPlayerId = null;
+      }
+
+      // ✅ Hvis det er en spiller med 0 liv sin tur, så skal spillet likevel gå videre.
+      // For å unngå at flere klienter spammer advanceTurn samtidig, lar vi kun *neste levende spiller*
+      // trigge skip.
+      const skippedDead = await this.maybeSkipDeadTurn();
+      if (skippedDead) {
+        // La neste poll/refresh plukke opp den nye turen (hindrer masse ekstra arbeid i samme tick)
+        return;
       }
 
       this.syncLastPlayedFromRoundState();
@@ -301,6 +356,71 @@ export class RoundComponent implements OnInit, OnDestroy {
     } else {
       this.viewState = 'waiting';
     }
+  }
+
+  // =========================
+  // ✅ SKIP DEAD PLAYERS' TURNS
+  // =========================
+  // Hvis currentTurn peker på en spiller med 0 liv, så må vi advance turn automatisk.
+  // For å unngå at alle klienter gjør dette samtidig, lar vi kun "neste levende" i turnOrder
+  // være den som utfører advanceTurn.
+  private async maybeSkipDeadTurn(): Promise<boolean> {
+    const rs = this.roundState;
+    const sessionId = this.sessionId;
+    const me = this.me;
+
+    if (!rs || !sessionId || !me) return false;
+    if (!rs.turnOrder?.length) return false;
+    if (rs.pendingAttack) return false;
+    if (this.isGameFinished) return false;
+
+    const order = rs.turnOrder;
+    const len = order.length;
+    const currentId = order[rs.currentTurnIndex] ?? null;
+    if (!currentId) return false;
+
+    const livesOf = (id: string) => {
+      // hvis vi ikke finner spilleren lokalt, anta at de lever (så vi ikke soft-locker)
+      const p = this.players.find((x) => x.id === id);
+      return p?.lives ?? 1;
+    };
+
+    // Hvis current-turn er levende, ingenting å gjøre
+    if (livesOf(currentId) > 0) return false;
+
+    // Finn neste levende spiller etter currentTurnIndex (circular)
+    let nextAliveId: string | null = null;
+    for (let i = 1; i <= len; i++) {
+      const idx = (rs.currentTurnIndex + i) % len;
+      const id = order[idx];
+      if (id && livesOf(id) > 0) {
+        nextAliveId = id;
+        break;
+      }
+    }
+
+    if (!nextAliveId) return false;
+
+    // Bare levende spillere kan trigge skip
+    if (livesOf(me.id) <= 0) return false;
+
+    // Bare "neste levende" får lov til å trigge skip for å unngå race
+    if (me.id !== nextAliveId) return true; // ✅ vi har detektert dead-turn, men lar neste levende gjøre jobben
+
+    // Vi er "neste levende" -> advance til vi treffer en levende spiller (kan være flere døde på rad)
+    let safety = len + 2;
+    while (safety-- > 0) {
+      const cid = order[rs.currentTurnIndex] ?? null;
+      if (cid && livesOf(cid) > 0) break;
+
+      await this.gameSession.advanceTurn(sessionId);
+      // optimistisk oppdatering lokalt så vi kan hoppe flere døde i samme tick uten ekstra fetch
+      rs.currentTurnIndex = (rs.currentTurnIndex + 1) % len;
+    }
+
+    // Vi har gjort endringen server-side; la neste polling refresh hente korrekt state
+    this.viewState = 'waiting';
+    return true;
   }
 
   private buildHandWithOneOfEach(remaining: Card[] = []) {
@@ -412,12 +532,7 @@ export class RoundComponent implements OnInit, OnDestroy {
   }
 
   private removePlayedCardAndDrawNew() {
-    if (this.selectedIndex != null) {
-      const remaining = this.hand.filter((_, i) => i !== this.selectedIndex);
-      this.buildHandWithOneOfEach(remaining);
-    } else {
-      this.buildHandWithOneOfEach(this.hand);
-    }
+    this.buildHandWithOneOfEach([]);
 
     this.selectingTarget = false;
     this.targetCandidates = [];
