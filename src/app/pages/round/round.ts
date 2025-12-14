@@ -30,14 +30,11 @@ export class RoundComponent implements OnInit, OnDestroy {
   // ✅ WINNING / PODIUM
   // =========================
   get isGameFinished(): boolean {
-    // Enkel klient-side finish: når 0 eller 1 spiller står igjen.
-    // (Vi har ikke eliminasjons-historikk i state enda, så 2./3. baseres på lives + tie-breaker.)
     const alive = this.players.filter((p) => (p.lives ?? 0) > 0);
     return this.players.length >= 2 && alive.length <= 1;
   }
 
   get podiumPlayers(): Player[] {
-    // Sorter: høyest lives først, så navn, så id (stabil tie-breaker)
     const sorted = [...this.players].sort((a, b) => {
       const la = a.lives ?? 0;
       const lb = b.lives ?? 0;
@@ -51,7 +48,6 @@ export class RoundComponent implements OnInit, OnDestroy {
   }
 
   get standingsPlayers(): Player[] {
-    // Samme sortering som podium (høyest lives først)
     return [...this.players].sort((a, b) => {
       const la = a.lives ?? 0;
       const lb = b.lives ?? 0;
@@ -126,22 +122,19 @@ export class RoundComponent implements OnInit, OnDestroy {
   private randomFadeTimer: any = null;
 
   // wheel layout constants
-  private readonly WHEEL_ITEM_H = 42; // må matche CSS-ish høyde på item
-  private readonly WHEEL_VISIBLE_CENTER_OFFSET = 2; // marker er midt i window, vi aligner ca. midt på item
-  private readonly WHEEL_WINDOW_H = 160; // må matche CSS .wheel-window height
+  private readonly WHEEL_ITEM_H = 42;
+  private readonly WHEEL_VISIBLE_CENTER_OFFSET = 2;
+  private readonly WHEEL_WINDOW_H = 160;
 
   // ✅ REFLECT UI state
   reflectAvailable = false;
   reflectorPlayer: Player | null = null;
 
-  // ✅ hvilken effect-index (0-basert) reflect-kortet ligger på i allEffectCards
   private reflectEffectIndex: number | null = null;
 
   get reflectUiReady(): boolean {
     if (!this.reflectAvailable) return false;
     if (this.reflectEffectIndex === null) return false;
-
-    // reflect-kortet er "klart" først når det er revealed
     return this.effectRevealCount > this.reflectEffectIndex;
   }
 
@@ -169,7 +162,6 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     this.me = this.gameSession.currentPlayer ?? null;
 
-    // 🃏 Start-hånd: alltid [DEFENCE, CURSE, ATTACK]
     this.dealInitialHand();
 
     await this.refreshState();
@@ -227,7 +219,6 @@ export class RoundComponent implements OnInit, OnDestroy {
       ]);
 
       this.players = this.sortPlayersByTurnOrder(players, roundState);
-
       this.roundState = roundState;
 
       await this.refreshSkipIndicators();
@@ -242,13 +233,11 @@ export class RoundComponent implements OnInit, OnDestroy {
         }
       }
 
-      // ✅ Hvis spillet er ferdig, vis vinnerskjerm for ALLE (også de som er ute)
       if (this.isGameFinished) {
         this.viewState = 'finished';
       }
 
       if (this.currentLives !== null && this.currentLives <= 0) {
-        // ✅ Ikke override finished
         if (this.viewState !== 'finished') this.viewState = 'lost';
       }
 
@@ -258,14 +247,8 @@ export class RoundComponent implements OnInit, OnDestroy {
         this.currentTurnPlayerId = null;
       }
 
-      // ✅ Hvis det er en spiller med 0 liv sin tur, så skal spillet likevel gå videre.
-      // For å unngå at flere klienter spammer advanceTurn samtidig, lar vi kun *neste levende spiller*
-      // trigge skip.
       const skippedDead = await this.maybeSkipDeadTurn();
-      if (skippedDead) {
-        // La neste poll/refresh plukke opp den nye turen (hindrer masse ekstra arbeid i samme tick)
-        return;
-      }
+      if (skippedDead) return;
 
       this.syncLastPlayedFromRoundState();
 
@@ -277,17 +260,12 @@ export class RoundComponent implements OnInit, OnDestroy {
         this.updateViewStateFromRoundState();
       }
 
-      // ✅ start random overlay timeline (countdown -> spin -> fade -> then allow drinking UI)
       this.startRandomSequenceIfNeeded();
-
-      // ✅ start attack effects animasjon (ikke for random)
       this.startAttackAnimationIfNeeded();
 
       try {
         this.cdr.detectChanges();
-      } catch {
-        // ignorer hvis view er destroyed
-      }
+      } catch {}
     } catch (e: any) {
       if (e?.message === '__SKIP_CONSUMED__') return;
       console.error('Kunne ikke refreshState i round:', e);
@@ -317,7 +295,6 @@ export class RoundComponent implements OnInit, OnDestroy {
     this.lastPlayedBy = this.players.find((p) => p.id === rs.lastFromPlayerId) ?? null;
     this.lastPlayedTarget = this.players.find((p) => p.id === rs.lastToPlayerId) ?? null;
 
-    // ✅ hvis reflect: lastToPlayerId er original target (den som reflectet)
     if (rs.pendingAttackIsReflect) {
       this.reflectorPlayer = this.players.find((p) => p.id === rs.lastToPlayerId) ?? null;
     } else {
@@ -334,7 +311,6 @@ export class RoundComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // ✅ hvis random overlay kjører, hold alle i "waiting" visuelt til overlay er done
     if (rs.pendingAttack && this.isRandomPendingAttack && this.randomPhase !== 'done') {
       this.viewState = 'waiting';
       return;
@@ -361,9 +337,6 @@ export class RoundComponent implements OnInit, OnDestroy {
   // =========================
   // ✅ SKIP DEAD PLAYERS' TURNS
   // =========================
-  // Hvis currentTurn peker på en spiller med 0 liv, så må vi advance turn automatisk.
-  // For å unngå at alle klienter gjør dette samtidig, lar vi kun "neste levende" i turnOrder
-  // være den som utfører advanceTurn.
   private async maybeSkipDeadTurn(): Promise<boolean> {
     const rs = this.roundState;
     const sessionId = this.sessionId;
@@ -380,15 +353,12 @@ export class RoundComponent implements OnInit, OnDestroy {
     if (!currentId) return false;
 
     const livesOf = (id: string) => {
-      // hvis vi ikke finner spilleren lokalt, anta at de lever (så vi ikke soft-locker)
       const p = this.players.find((x) => x.id === id);
       return p?.lives ?? 1;
     };
 
-    // Hvis current-turn er levende, ingenting å gjøre
     if (livesOf(currentId) > 0) return false;
 
-    // Finn neste levende spiller etter currentTurnIndex (circular)
     let nextAliveId: string | null = null;
     for (let i = 1; i <= len; i++) {
       const idx = (rs.currentTurnIndex + i) % len;
@@ -400,25 +370,19 @@ export class RoundComponent implements OnInit, OnDestroy {
     }
 
     if (!nextAliveId) return false;
-
-    // Bare levende spillere kan trigge skip
     if (livesOf(me.id) <= 0) return false;
 
-    // Bare "neste levende" får lov til å trigge skip for å unngå race
-    if (me.id !== nextAliveId) return true; // ✅ vi har detektert dead-turn, men lar neste levende gjøre jobben
+    if (me.id !== nextAliveId) return true;
 
-    // Vi er "neste levende" -> advance til vi treffer en levende spiller (kan være flere døde på rad)
     let safety = len + 2;
     while (safety-- > 0) {
       const cid = order[rs.currentTurnIndex] ?? null;
       if (cid && livesOf(cid) > 0) break;
 
       await this.gameSession.advanceTurn(sessionId);
-      // optimistisk oppdatering lokalt så vi kan hoppe flere døde i samme tick uten ekstra fetch
       rs.currentTurnIndex = (rs.currentTurnIndex + 1) % len;
     }
 
-    // Vi har gjort endringen server-side; la neste polling refresh hente korrekt state
     this.viewState = 'waiting';
     return true;
   }
@@ -448,7 +412,6 @@ export class RoundComponent implements OnInit, OnDestroy {
   onSelectCard(index: number) {
     this.selectedIndex = index;
 
-    // ✅ hvis random-kort er selected, sørg for at target-lista ikke henger igjen
     if (this.isRandomSelected) {
       this.selectingTarget = false;
       this.targetCandidates = [];
@@ -486,7 +449,6 @@ export class RoundComponent implements OnInit, OnDestroy {
     if (!card || !me || !sessionId) return;
 
     try {
-      // ✅ DEFENCE: effect på deg, så turn advances med en gang
       if (card.type === 'defence') {
         await this.gameSession.playDefenceCard(sessionId, me.id, card.id);
         await this.gameSession.advanceTurn(sessionId);
@@ -494,7 +456,6 @@ export class RoundComponent implements OnInit, OnDestroy {
         return;
       }
 
-      // ✅ ATTACK random: velg target og skriv til round_state (winner blir synced for alle via pending_attack_to_player_id)
       if (card.type === 'attack' && this.isCardRandom(card)) {
         const alive = this.players.filter((p) => p.lives > 0);
         if (!alive.length) return;
@@ -504,14 +465,11 @@ export class RoundComponent implements OnInit, OnDestroy {
 
         await this.gameSession.playAttackCard(sessionId, me.id, target.id, card.id);
 
-        // visuelt: gå til waiting, overlay tar over
         this.viewState = 'waiting';
-
         this.removePlayedCardAndDrawNew();
         return;
       }
 
-      // ✅ normal ATTACK / CURSE: vis target-liste
       if (card.type === 'attack' || card.type === 'curse') {
         const candidates = this.players.filter((p) => p.id !== me.id && p.lives > 0);
 
@@ -549,7 +507,6 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     if (!me || !sessionId) return;
 
-    // ✅ hard stop: ikke tillat før animasjonen er ferdig
     if (!this.canConfirmDrank) return;
 
     try {
@@ -577,15 +534,20 @@ export class RoundComponent implements OnInit, OnDestroy {
     const sessionId = this.sessionId;
 
     if (!rs || !me || !sessionId) return;
-    if (!rs.pendingAttack || rs.pendingAttackIsReflect) return;
+    if (!rs.pendingAttack) return;
 
     // ✅ reflect må være "klar" (revealed) før man kan trykke
     if (!this.reflectUiReady) return;
 
     try {
-      const fixedTotal = Math.max(0, this.pendingAttackTotalDrinks ?? 0);
-      const attackerId = rs.pendingAttackFromPlayerId;
+      // ✅ når vi reflecter, sender vi totalen slik den er nå (etter at denne targetens effekter har blitt regnet)
+      const fixedTotal =
+        rs.pendingAttackFixedTotal != null
+          ? Math.max(0, this.pendingAttackTotalDrinks ?? rs.pendingAttackFixedTotal)
+          : Math.max(0, this.pendingAttackTotalDrinks ?? 0);
 
+      // ✅ angriper er alltid "current from" (så reflect kan bounce)
+      const attackerId = rs.pendingAttackFromPlayerId;
       if (!attackerId) return;
 
       const effectIdsToDelete = [...this.usedEffectIds];
@@ -607,7 +569,6 @@ export class RoundComponent implements OnInit, OnDestroy {
   }
 
   onSelectTarget(playerId: string) {
-    // ✅ IKKE lock her – du vil kunne trykke raskt mellom spillere
     this.selectedTargetId = playerId;
   }
 
@@ -630,9 +591,7 @@ export class RoundComponent implements OnInit, OnDestroy {
         await this.gameSession.advanceTurn(sessionId);
       }
 
-      // visuelt: gå til waiting, polling tar resten
       this.viewState = 'waiting';
-
       this.removePlayedCardAndDrawNew();
     } catch (e) {
       console.error('Feil ved bekreftelse av target:', e);
@@ -666,7 +625,6 @@ export class RoundComponent implements OnInit, OnDestroy {
     const rs = this.roundState;
     const sessionId = this.sessionId;
 
-    // reset reflect UI (re-settes hvis reflect finnes i dette angrepet)
     this.reflectAvailable = false;
     this.reflectEffectIndex = null;
 
@@ -685,7 +643,6 @@ export class RoundComponent implements OnInit, OnDestroy {
       this.reflectAvailable = false;
       this.reflectEffectIndex = null;
 
-      // reset anim state
       this.animState = 'idle';
       this.currentAttackKey = null;
       this.effectRevealCount = 0;
@@ -697,16 +654,13 @@ export class RoundComponent implements OnInit, OnDestroy {
       this.effectFrom = [];
       this.stopAttackAnimation();
 
-      // reset random overlay
       this.resetRandomOverlay();
-
       return;
     }
 
     this.pendingAttackTarget =
       this.players.find((p) => p.id === rs.pendingAttackToPlayerId) ?? null;
 
-    // hent pending attack card
     try {
       this.pendingAttackCard = this.cards.getCardById(rs.pendingAttackCardId);
     } catch {
@@ -735,24 +689,7 @@ export class RoundComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // ✅ hvis angrepet allerede er reflectet -> lås total fra DB og ikke bruk target-effects
-    if (rs.pendingAttackIsReflect && rs.pendingAttackFixedTotal != null) {
-      this.pendingAttackEffects = [];
-      this.attackSequenceCards = [this.pendingAttackCard];
-      this.pendingAttackTotalDrinks = Math.max(0, rs.pendingAttackFixedTotal);
-      this.displayPendingTotal = this.pendingAttackTotalDrinks;
-
-      // slå av effect anim
-      this.usedEffectIds = [];
-      this.expectedEffectCount = 0;
-      this.effectDotArray = [];
-      this.effectRevealCount = 0;
-      this.animState = 'done';
-      this.stopAttackAnimation();
-      return;
-    }
-
-    // ellers: hent effekter på target
+    // ✅ Hent effekter på target (GJELDER OGSÅ reflect-angrep)
     try {
       this.pendingAttackEffects = await this.gameSession.getPlayerEffectsForSession(
         sessionId,
@@ -763,14 +700,14 @@ export class RoundComponent implements OnInit, OnDestroy {
       this.pendingAttackEffects = [];
     }
 
-    // ✅ viktig: reset usedEffectIds for denne beregningen (polling ellers gir stale)
+    // ✅ reset usedEffectIds for hver beregning
     this.usedEffectIds = [];
 
     const curseCards: Card[] = this.pendingAttackEffects
       .filter((e) => e.effectType === 'curse')
       .map((e) => this.cards.getCardById(e.cardId))
       .filter((c): c is Card => !!c)
-      .filter((c) => !(c.passive ?? []).includes('skip')); // skip er ikke drinking-effect
+      .filter((c) => !(c.passive ?? []).includes('skip'));
 
     const defenceCards: Card[] = this.pendingAttackEffects
       .filter((e) => e.effectType === 'defence')
@@ -790,9 +727,7 @@ export class RoundComponent implements OnInit, OnDestroy {
       let best = Number.POSITIVE_INFINITY;
 
       for (const p of passives) {
-        if (map[p] !== undefined) {
-          best = Math.min(best, map[p]);
-        }
+        if (map[p] !== undefined) best = Math.min(best, map[p]);
       }
       return best;
     };
@@ -811,10 +746,18 @@ export class RoundComponent implements OnInit, OnDestroy {
     let total = 0;
     let baseSet = false;
 
+    // ✅ BASE:
+    // - vanlig angrep: card.drinkAmount
+    // - reflect-angrep: pendingAttackFixedTotal (hvis finnes) er ny base
+    const baseAttackTotal =
+      rs.pendingAttackIsReflect && rs.pendingAttackFixedTotal != null
+        ? rs.pendingAttackFixedTotal
+        : this.pendingAttackCard.drinkAmount;
+
     // først: apply attack + curses
     for (const card of fullSeq) {
       if (card.type === 'attack') {
-        total = card.drinkAmount;
+        total = baseAttackTotal;
         baseSet = true;
         continue;
       }
@@ -838,7 +781,7 @@ export class RoundComponent implements OnInit, OnDestroy {
       }
     }
 
-    // så: defence – MEN reflect skal IKKE auto-trigge; den blir en knapp
+    // så: defence – reflect er manuell knapp, men den skal kunne bounce uansett
     for (const card of sortedDefence) {
       if (!baseSet) break;
       if (total === 0) break;
@@ -846,11 +789,9 @@ export class RoundComponent implements OnInit, OnDestroy {
       const passives = card.passive ?? [];
 
       if (passives.includes('reflect')) {
-        // ✅ ikke set total=0 – reflect er nå en manuell beslutning
         this.reflectAvailable = true;
         this.markEffectUsedForCard(card, 'defence');
-        // stopp videre defence: reflect "vinner"
-        break;
+        break; // reflect vinner, stopp videre defence
       }
 
       let used = false;
@@ -874,21 +815,16 @@ export class RoundComponent implements OnInit, OnDestroy {
       if (used) this.markEffectUsedForCard(card, 'defence');
     }
 
-    // ✅ for visuals: hvis reflectAvailable, kutt sekvensen slik at vi ikke viser defences etter reflect
+    // visuals: stopp ved reflect hvis reflect finnes
     if (this.reflectAvailable) {
       const reflectIdx = fullSeq.findIndex(
         (c) => c.type === 'defence' && (c.passive ?? []).includes('reflect')
       );
-      if (reflectIdx >= 0) {
-        this.attackSequenceCards = fullSeq.slice(0, reflectIdx + 1);
-      } else {
-        this.attackSequenceCards = fullSeq;
-      }
+      this.attackSequenceCards = reflectIdx >= 0 ? fullSeq.slice(0, reflectIdx + 1) : fullSeq;
     } else {
       this.attackSequenceCards = fullSeq;
     }
 
-    // ✅ finn posisjonen til reflect i effect-lista (0-basert i allEffectCards)
     if (this.reflectAvailable) {
       const effectsOnly = this.attackSequenceCards.slice(1);
       const idx = effectsOnly.findIndex(
@@ -934,8 +870,9 @@ export class RoundComponent implements OnInit, OnDestroy {
   get canConfirmDrank(): boolean {
     if (this.viewState !== 'drinking') return true;
 
-    // ✅ hvis reflect er tilgjengelig og er REVEALED: må trykke reflect først
-    if (this.reflectUiReady && !this.isReflectPendingAttack) return false;
+    // ✅ hvis reflect er tilgjengelig og revealed, må man velge reflect eller vente? (du ønsket tidligere “må reflect først”)
+    // Her lar vi fortsatt "må reflect først" hvis den er klar:
+    if (this.reflectUiReady) return false;
 
     if (this.expectedEffectCount <= 0) return true;
     return this.animState === 'done';
@@ -944,7 +881,7 @@ export class RoundComponent implements OnInit, OnDestroy {
   get canConfirmReflect(): boolean {
     if (this.viewState !== 'drinking') return false;
     if (!this.reflectUiReady) return false;
-    if (this.isReflectPendingAttack) return false;
+
     if (this.expectedEffectCount <= 0) return true;
     return this.animState === 'done';
   }
@@ -961,10 +898,13 @@ export class RoundComponent implements OnInit, OnDestroy {
       .map((e) => e.id)
       .sort()
       .join(',');
-    return `${rs.pendingAttackCardId}|${rs.pendingAttackToPlayerId}|${effectIds}`;
+    // ✅ inkluder reflect flag + fixedTotal så anim resetter riktig ved bounce
+    return `${rs.pendingAttackCardId}|${rs.pendingAttackToPlayerId}|${effectIds}|${
+      rs.pendingAttackIsReflect ? 'R' : 'N'
+    }|${rs.pendingAttackFixedTotal ?? ''}`;
   }
 
-  private computeStepTotals(sequence: Card[]): number[] {
+  private computeStepTotals(sequence: Card[], baseOverride: number | null): number[] {
     let total = 0;
     let baseSet = false;
     const totals: number[] = [];
@@ -977,7 +917,7 @@ export class RoundComponent implements OnInit, OnDestroy {
 
       switch (card.type) {
         case 'attack': {
-          total = card.drinkAmount;
+          total = baseOverride != null ? baseOverride : card.drinkAmount;
           baseSet = true;
           break;
         }
@@ -994,10 +934,10 @@ export class RoundComponent implements OnInit, OnDestroy {
 
         case 'defence': {
           if (!baseSet) break;
-          // ✅ reflect endrer ikke total i animasjonen (manuell knapp)
+
           const passives = card.passive ?? [];
           if (passives.includes('reflect')) {
-            // behold total, bare push
+            // reflect endrer ikke total i animasjonen (det er en knapp)
             break;
           }
 
@@ -1025,7 +965,7 @@ export class RoundComponent implements OnInit, OnDestroy {
     this.effectFrom = [];
 
     for (let i = 0; i < effectsCount; i++) {
-      const rot = Math.floor(Math.random() * 51) - 25; // -25..25
+      const rot = Math.floor(Math.random() * 51) - 25;
       this.effectRotations.push(`${rot}deg`);
 
       const from = Math.random() < 0.5 ? '-140vw' : '140vw';
@@ -1058,7 +998,6 @@ export class RoundComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // ✅ random attack: ingen effects
     if (this.isRandomPendingAttack) {
       this.stopAttackAnimation();
       this.animState = 'done';
@@ -1066,17 +1005,6 @@ export class RoundComponent implements OnInit, OnDestroy {
       this.effectDotArray = [];
       this.effectRevealCount = 0;
       this.displayPendingTotal = this.pendingAttackCard?.drinkAmount ?? this.displayPendingTotal;
-      return;
-    }
-
-    // ✅ reflect-locked: ingen effects anim
-    if (rs.pendingAttackIsReflect && rs.pendingAttackFixedTotal != null) {
-      this.stopAttackAnimation();
-      this.animState = 'done';
-      this.expectedEffectCount = 0;
-      this.effectDotArray = [];
-      this.effectRevealCount = 0;
-      this.displayPendingTotal = rs.pendingAttackFixedTotal;
       return;
     }
 
@@ -1088,9 +1016,14 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     this.animState = 'running';
 
-    this.stepTotals = this.computeStepTotals(this.attackSequenceCards);
+    const baseOverride =
+      rs.pendingAttackIsReflect && rs.pendingAttackFixedTotal != null
+        ? rs.pendingAttackFixedTotal
+        : null;
 
-    const base = this.pendingAttackCard?.drinkAmount ?? 0;
+    this.stepTotals = this.computeStepTotals(this.attackSequenceCards, baseOverride);
+
+    const base = baseOverride != null ? baseOverride : this.pendingAttackCard?.drinkAmount ?? 0;
     const effectsCount = Math.max(0, this.stepTotals.length - 1);
 
     this.initEffectVisuals(effectsCount);
@@ -1127,7 +1060,13 @@ export class RoundComponent implements OnInit, OnDestroy {
   getAttackTotalBreakdownAnimated(): string {
     if (!this.pendingAttackCard) return '';
 
-    const base = this.pendingAttackCard.drinkAmount;
+    const rs = this.roundState;
+
+    const base =
+      rs?.pendingAttackIsReflect && rs?.pendingAttackFixedTotal != null
+        ? rs.pendingAttackFixedTotal
+        : this.pendingAttackCard.drinkAmount;
+
     const total = this.displayPendingTotal || base;
 
     const baseStr = `${base} slurk${base === 1 ? '' : 'er'}`;
@@ -1330,7 +1269,7 @@ export class RoundComponent implements OnInit, OnDestroy {
     } catch {}
   }
 
-  // @ts-ignore - internal landing index
+  // @ts-ignore
   private _wheelLandingIndex: number = 0;
   private _wheelStartIndex: number = 0;
 
@@ -1346,11 +1285,9 @@ export class RoundComponent implements OnInit, OnDestroy {
     this.wheelTransition = 'none';
     this.wheelTransform = `translateY(-${startY}px)`;
 
-    // 🎯 tilfeldig landing INNI navnet (men aldri i kanten)
-    const safeMargin = 1; // px
+    const safeMargin = 1;
     const halfItem = this.WHEEL_ITEM_H / 2;
 
-    // random offset innenfor navneblokka
     const randomOffset =
       Math.random() * (this.WHEEL_ITEM_H - safeMargin * 2) - halfItem + safeMargin;
 
@@ -1401,7 +1338,6 @@ export class RoundComponent implements OnInit, OnDestroy {
       const ia = orderMap.get(a.id);
       const ib = orderMap.get(b.id);
 
-      // spillere som av en eller annen grunn ikke er i turnOrder havner nederst
       if (ia === undefined && ib === undefined) return 0;
       if (ia === undefined) return 1;
       if (ib === undefined) return -1;

@@ -588,8 +588,8 @@ export class GameSessionService {
 
   async reflectPendingAttack(
     sessionId: string,
-    originalTargetId: string,
-    attackerId: string,
+    reflectorId: string, // (originalTargetId i signaturen din)
+    sendToPlayerId: string, // (attackerId i signaturen din)
     fixedTotal: number,
     usedEffectIds: string[]
   ): Promise<void> {
@@ -599,21 +599,20 @@ export class GameSessionService {
       throw new Error('Ingen aktivt angrep å reflecte.');
     }
 
-    // ✅ guard: ikke allow dobbelt reflect
-    if (rs.pendingAttackIsReflect) {
-      throw new Error('Angrepet er allerede reflectet.');
-    }
-
-    if (rs.pendingAttackToPlayerId !== originalTargetId) {
+    // ✅ reflect kan bare trykkes av den som er TARGET akkurat nå
+    if (rs.pendingAttackToPlayerId !== reflectorId) {
       throw new Error('Dette angrepet er ikke på denne spilleren (reflect).');
     }
 
-    if (!rs.pendingAttackFromPlayerId || rs.pendingAttackFromPlayerId !== attackerId) {
-      throw new Error('Angriper matcher ikke round_state (reflect).');
+    // ✅ vi forventer at du sender tilbake til den som er "from" akkurat nå
+    // (det gjør RoundComponent ved å sende attackerId = rs.pendingAttackFromPlayerId)
+    if (!rs.pendingAttackFromPlayerId || rs.pendingAttackFromPlayerId !== sendToPlayerId) {
+      throw new Error('Mottaker matcher ikke round_state (reflect).');
     }
 
     if (fixedTotal < 0) fixedTotal = 0;
 
+    // ✅ slett brukte effects på den som reflecter (valgfritt, men passer modellen din)
     if (usedEffectIds && usedEffectIds.length > 0) {
       const { error: delError } = await this.supabase.client
         .from('player_effects')
@@ -626,14 +625,24 @@ export class GameSessionService {
       }
     }
 
+    // ✅ BOUNCE:
+    // - den som trykker reflect blir ny "from"
+    // - den du sender til blir ny "to"
     const { error: rsError } = await this.supabase.client
       .from('round_state')
       .update({
         pending_attack: true,
-        pending_attack_to_player_id: attackerId,
+        pending_attack_from_player_id: reflectorId,
+        pending_attack_to_player_id: sendToPlayerId,
 
         pending_attack_fixed_total: fixedTotal,
         pending_attack_is_reflect: true,
+
+        // (anbefalt for UI/tekst)
+        last_from_player_id: reflectorId,
+        last_to_player_id: sendToPlayerId,
+        last_card_id: rs.pendingAttackCardId,
+        last_card_type: 'attack',
       })
       .eq('session_id', sessionId);
 

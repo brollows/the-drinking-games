@@ -299,7 +299,7 @@
       <!-- ✅ REFLECT BUTTON (skjules helt til reflect-kortet er revealed) -->
       <button
         class="btn danger"
-        *ngIf="reflectUiReady && !roundState?.pendingAttackIsReflect"
+        *ngIf="reflectUiReady"
         (click)="onConfirmReflect()"
         [disabled]="isBtnLocked('confirmReflect') || !canConfirmReflect"
         style="margin-top: 1.5rem"
@@ -310,7 +310,7 @@
       <!-- ✅ IKKE vis “Jeg har drukket” når reflect er klar og ikke allerede reflectet -->
       <button
         class="btn primary"
-        *ngIf="!(reflectUiReady && !roundState?.pendingAttackIsReflect)"
+        *ngIf="!reflectUiReady"
         (click)="onConfirmDrank()"
         [disabled]="isBtnLocked('confirmDrank') || !canConfirmDrank"
         style="margin-top: 1.5rem"

@@ -10,6 +10,19 @@ Type of defence cards:
 
 export const DEFENCE_CARDS: Card[] = [
   {
+    id: 'def-012',
+    type: 'defence',
+    title: 'Snuff',
+    description:
+      'Kim snuffa så hardt at slrukene gikk i retur! Reflekterer drikkemengden tilbake til angriperen!',
+    drinkAmount: 0,
+    passive: ['reflect'],
+  },
+];
+
+//TODO: Putt dette tilbake når jeg er ferdig å teste
+export const DEFENCE_CARDS_: Card[] = [
+  {
     id: 'def-001',
     type: 'defence',
     title: 'Glem det',
