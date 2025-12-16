@@ -69,7 +69,7 @@
               [style.transform]="wheelTransform"
               [style.transition]="wheelTransition"
             >
-              @for (p of wheelReelItems; track p) {
+              @for (p of wheelReelItems; track p.id) {
               <div class="wheel-item-vertical">
                 {{ p.name }}
               </div>
@@ -122,7 +122,7 @@
       <!-- HÅNDEN -->
       @if (hand.length) {
       <div class="card-hand">
-        @for (c of hand; track c; let i = $index) {
+        @for (c of hand; track c.id; let i = $index) {
         <button
           class="hand-card"
           [class.is-selected]="i === selectedIndex"
@@ -168,7 +168,7 @@
           <h3 class="target-title">Velg hvem som skal få kortet</h3>
 
           <ul class="target-list">
-            @for (p of targetCandidates; track p) {
+            @for (p of targetCandidates; track p.id) {
             <li class="target-row">
               <button
                 type="button"
@@ -264,7 +264,7 @@
     @if (players.length) {
     <div class="waiting-player-scroll">
       <ul class="waiting-player-list">
-        @for (p of players; track p) {
+        @for (p of players; track p.id) {
         <li
           class="waiting-player-row"
           [class.is-current]="p.id === currentTurnPlayerId"
@@ -386,7 +386,7 @@
       <section class="standings">
         <h3>Full liste</h3>
         <ul class="standings-list">
-          @for (p of standingsPlayers; track p; let i = $index) {
+          @for (p of standingsPlayers; track p.id; let i = $index) {
           <li class="standings-row">
             <span class="standings-rank">#{{ i + 1 }}</span>
             <span class="standings-name">{{ p.name }}</span>
@@ -473,7 +473,7 @@
     }
 
     <div class="effect-stack">
-      @for (c of allEffectCards; track c; let i = $index) {
+      @for (c of allEffectCards; track c.id; let i = $index) {
       <button
         class="hand-card hand-card--single effect-card-stacked"
         [class.type-attack]="c.type === 'attack'"
