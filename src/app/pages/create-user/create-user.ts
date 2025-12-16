@@ -15,20 +15,20 @@ export class CreateUserComponent {
     private router: Router,
     private gameSession: GameSessionService,
     private player: PlayerService
-  ) {}
+  ) { }
 
   async onStartGame(playerName: string) {
-    const trimmedName = (playerName ?? '').trim();
-    if (!trimmedName) {
+    if (!playerName?.trim()) {
       alert('Skriv inn et spillernavn først 🙃');
       return;
     }
 
     try {
-      this.player.setName(trimmedName);
+      this.player.setName(playerName);
 
-      const session = await this.gameSession.createHostSession(trimmedName);
+      const session = await this.gameSession.createHostSession(playerName.trim());
 
+      // Her kan du f.eks. lagre joinCode i PlayerService eller bare logge:
       console.log('Session opprettet med kode:', session.joinCode);
 
       this.router.navigate(['/play']);
@@ -38,22 +38,19 @@ export class CreateUserComponent {
     }
   }
 
+
   async onJoinGame(playerName: string, joinCode: string) {
-    const normalizedCode = (joinCode ?? '').trim().toUpperCase();
-    const trimmedName = (playerName ?? '').trim();
+    const normalizedCode = joinCode.trim().toUpperCase();
+    const trimmedName = playerName.trim();
 
     if (!normalizedCode || !trimmedName) {
-      alert('Mangler kode eller navn');
-      return;
+      throw new Error('Mangler kode eller navn');
     }
 
     try {
-      const session = await this.gameSession.joinSession(normalizedCode, trimmedName);
-
-      this.player.setName(trimmedName);
-
+      const session = await this.gameSession.joinSession(normalizedCode, playerName);
+      this.player.setName(playerName);
       console.log('Joinet session:', session);
-
       this.router.navigate(['/play']);
     } catch (e: any) {
       console.error(e);
@@ -62,7 +59,9 @@ export class CreateUserComponent {
   }
 
   getPlayerName() {
-    if (!this.player.hasName()) return '';
+    if (!this.player.hasName()) {
+      return '';
+    }
     return this.player.getName();
   }
 }

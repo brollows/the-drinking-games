@@ -1,3 +1,4 @@
+// round.ts
 import { Component, OnInit, ChangeDetectorRef, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -9,8 +10,6 @@ import {
 } from '../../services/game-session.service';
 import { CardService } from '../../cards/card.service';
 import { Card } from '../../cards/card';
-import { SupabaseService } from '../../services/supabase.service';
-import { RealtimeChannel } from '@supabase/supabase-js';
 
 type AttackAnimState = 'idle' | 'running' | 'done';
 type RandomPhase = 'idle' | 'countdown' | 'spinning' | 'done';
@@ -93,6 +92,7 @@ export class RoundComponent implements OnInit, OnDestroy {
   private currentAttackKey: string | null = null;
 
   private me: Player | null = null;
+  private pollingInterval: any = null;
 
   expectedEffectCount = 0;
   effectDotArray: null[] = [];
@@ -138,24 +138,12 @@ export class RoundComponent implements OnInit, OnDestroy {
     return this.effectRevealCount > this.reflectEffectIndex;
   }
 
-  // =========================
-  // ✅ REALTIME
-  // =========================
-  private rtChannel: RealtimeChannel | null = null;
-  private refreshTimer: any = null;
-  private failsafeInterval: any = null;
-
-  // cache alle effekter (for å slippe N kall)
-  private effectsCache: PlayerEffect[] = [];
-  private effectsCacheLoadedForSession: string | null = null;
-
   constructor(
     private route: ActivatedRoute,
     private router: Router,
     private gameSession: GameSessionService,
     private cards: CardService,
-    private cdr: ChangeDetectorRef,
-    private supabase: SupabaseService
+    private cdr: ChangeDetectorRef
   ) {}
 
   async ngOnInit(): Promise<void> {
@@ -178,72 +166,15 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     await this.refreshState();
 
-    this.setupRealtime();
-
-    // failsafe: lav frekvens for å tåle at realtime dropper i gratisoppsett/nett
-    this.failsafeInterval = setInterval(() => {
-      this.scheduleRefresh(0);
-    }, 20000);
+    this.pollingInterval = setInterval(() => {
+      this.refreshState();
+    }, 500);
   }
 
-  async ngOnDestroy(): Promise<void> {
-    if (this.refreshTimer) clearTimeout(this.refreshTimer);
-    if (this.failsafeInterval) clearInterval(this.failsafeInterval);
-
-    await this.supabase.removeChannel(this.rtChannel);
-    this.rtChannel = null;
-
+  ngOnDestroy(): void {
+    if (this.pollingInterval) clearInterval(this.pollingInterval);
     this.stopAttackAnimation();
     this.stopRandomTimers();
-  }
-
-  private setupRealtime() {
-    if (!this.sessionId) return;
-
-    const sessionId = this.sessionId;
-
-    this.rtChannel = this.supabase
-      .createChannel(`round:${sessionId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'players', filter: `session_id=eq.${sessionId}` },
-        () => this.scheduleRefresh(40)
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'round_state',
-          filter: `session_id=eq.${sessionId}`,
-        },
-        () => this.scheduleRefresh(10)
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'player_effects',
-          filter: `session_id=eq.${sessionId}`,
-        },
-        () => {
-          // cache er kanskje utdatert nå
-          this.effectsCacheLoadedForSession = null;
-          this.scheduleRefresh(60);
-        }
-      )
-      .subscribe((status) => {
-        console.log('[Realtime][round] status:', status);
-      });
-  }
-
-  private scheduleRefresh(ms: number = 80) {
-    if (this.refreshTimer) clearTimeout(this.refreshTimer);
-    this.refreshTimer = setTimeout(() => {
-      this.refreshTimer = null;
-      this.refreshState();
-    }, ms);
   }
 
   goHome() {
@@ -278,9 +209,6 @@ export class RoundComponent implements OnInit, OnDestroy {
     return !!this.roundState?.pendingAttackIsReflect;
   }
 
-  // =========================
-  // ✅ MAIN REFRESH (nå trigges av realtime)
-  // =========================
   private async refreshState() {
     if (!this.sessionId) return;
 
@@ -292,6 +220,8 @@ export class RoundComponent implements OnInit, OnDestroy {
 
       this.players = this.sortPlayersByTurnOrder(players, roundState);
       this.roundState = roundState;
+
+      await this.refreshSkipIndicators();
 
       const meId = this.me?.id ?? null;
 
@@ -606,14 +536,17 @@ export class RoundComponent implements OnInit, OnDestroy {
     if (!rs || !me || !sessionId) return;
     if (!rs.pendingAttack) return;
 
+    // ✅ reflect må være "klar" (revealed) før man kan trykke
     if (!this.reflectUiReady) return;
 
     try {
+      // ✅ når vi reflecter, sender vi totalen slik den er nå (etter at denne targetens effekter har blitt regnet)
       const fixedTotal =
         rs.pendingAttackFixedTotal != null
           ? Math.max(0, this.pendingAttackTotalDrinks ?? rs.pendingAttackFixedTotal)
           : Math.max(0, this.pendingAttackTotalDrinks ?? 0);
 
+      // ✅ angriper er alltid "current from" (så reflect kan bounce)
       const attackerId = rs.pendingAttackFromPlayerId;
       if (!attackerId) return;
 
@@ -688,13 +621,6 @@ export class RoundComponent implements OnInit, OnDestroy {
     }
   }
 
-  // ✅ Hent alle effekter én gang (ved behov), filtrer lokalt per playerId
-  private async ensureEffectsCacheLoaded(sessionId: string) {
-    if (this.effectsCacheLoadedForSession === sessionId) return;
-    this.effectsCache = await this.gameSession.getAllPlayerEffectsForSession(sessionId);
-    this.effectsCacheLoadedForSession = sessionId;
-  }
-
   private async syncPendingAttackEffects() {
     const rs = this.roundState;
     const sessionId = this.sessionId;
@@ -763,12 +689,11 @@ export class RoundComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // ✅ hent alle effekter i ett kall, filtrer lokalt
+    // ✅ Hent effekter på target (GJELDER OGSÅ reflect-angrep)
     try {
-      await this.ensureEffectsCacheLoaded(sessionId);
-
-      this.pendingAttackEffects = this.effectsCache.filter(
-        (e) => e.playerId === rs.pendingAttackToPlayerId
+      this.pendingAttackEffects = await this.gameSession.getPlayerEffectsForSession(
+        sessionId,
+        rs.pendingAttackToPlayerId
       );
     } catch (e) {
       console.error('Feil ved henting av pendingAttackEffects:', e);
@@ -780,25 +705,13 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     const curseCards: Card[] = this.pendingAttackEffects
       .filter((e) => e.effectType === 'curse')
-      .map((e) => {
-        try {
-          return this.cards.getCardById(e.cardId);
-        } catch {
-          return null;
-        }
-      })
+      .map((e) => this.cards.getCardById(e.cardId))
       .filter((c): c is Card => !!c)
       .filter((c) => !(c.passive ?? []).includes('skip'));
 
     const defenceCards: Card[] = this.pendingAttackEffects
       .filter((e) => e.effectType === 'defence')
-      .map((e) => {
-        try {
-          return this.cards.getCardById(e.cardId);
-        } catch {
-          return null;
-        }
-      })
+      .map((e) => this.cards.getCardById(e.cardId))
       .filter((c): c is Card => !!c);
 
     const cursePriority: Record<string, number> = { increase: 0, double: 1 };
@@ -833,6 +746,9 @@ export class RoundComponent implements OnInit, OnDestroy {
     let total = 0;
     let baseSet = false;
 
+    // ✅ BASE:
+    // - vanlig angrep: card.drinkAmount
+    // - reflect-angrep: pendingAttackFixedTotal (hvis finnes) er ny base
     const baseAttackTotal =
       rs.pendingAttackIsReflect && rs.pendingAttackFixedTotal != null
         ? rs.pendingAttackFixedTotal
@@ -865,7 +781,7 @@ export class RoundComponent implements OnInit, OnDestroy {
       }
     }
 
-    // så: defence – reflect er manuell knapp
+    // så: defence – reflect er manuell knapp, men den skal kunne bounce uansett
     for (const card of sortedDefence) {
       if (!baseSet) break;
       if (total === 0) break;
@@ -875,7 +791,7 @@ export class RoundComponent implements OnInit, OnDestroy {
       if (passives.includes('reflect')) {
         this.reflectAvailable = true;
         this.markEffectUsedForCard(card, 'defence');
-        break;
+        break; // reflect vinner, stopp videre defence
       }
 
       let used = false;
@@ -899,6 +815,7 @@ export class RoundComponent implements OnInit, OnDestroy {
       if (used) this.markEffectUsedForCard(card, 'defence');
     }
 
+    // visuals: stopp ved reflect hvis reflect finnes
     if (this.reflectAvailable) {
       const reflectIdx = fullSeq.findIndex(
         (c) => c.type === 'defence' && (c.passive ?? []).includes('reflect')
@@ -953,6 +870,8 @@ export class RoundComponent implements OnInit, OnDestroy {
   get canConfirmDrank(): boolean {
     if (this.viewState !== 'drinking') return true;
 
+    // ✅ hvis reflect er tilgjengelig og revealed, må man velge reflect eller vente? (du ønsket tidligere “må reflect først”)
+    // Her lar vi fortsatt "må reflect først" hvis den er klar:
     if (this.reflectUiReady) return false;
 
     if (this.expectedEffectCount <= 0) return true;
@@ -979,6 +898,7 @@ export class RoundComponent implements OnInit, OnDestroy {
       .map((e) => e.id)
       .sort()
       .join(',');
+    // ✅ inkluder reflect flag + fixedTotal så anim resetter riktig ved bounce
     return `${rs.pendingAttackCardId}|${rs.pendingAttackToPlayerId}|${effectIds}|${
       rs.pendingAttackIsReflect ? 'R' : 'N'
     }|${rs.pendingAttackFixedTotal ?? ''}`;
@@ -1017,6 +937,7 @@ export class RoundComponent implements OnInit, OnDestroy {
 
           const passives = card.passive ?? [];
           if (passives.includes('reflect')) {
+            // reflect endrer ikke total i animasjonen (det er en knapp)
             break;
           }
 
@@ -1166,20 +1087,17 @@ export class RoundComponent implements OnInit, OnDestroy {
     if (rs.pendingAttack) return;
     if (currentTurnId !== me.id) return;
 
-    // ✅ her bruker vi cache også (slipper ekstra kall)
+    let effects: PlayerEffect[] = [];
     try {
-      await this.ensureEffectsCacheLoaded(sessionId);
+      effects = await this.gameSession.getPlayerEffectsForSession(sessionId, me.id);
     } catch {
       return;
     }
 
-    const effects = this.effectsCache.filter(
-      (e) => e.playerId === me.id && e.effectType === 'curse'
-    );
-
+    const skipEffects = effects.filter((e) => e.effectType === 'curse');
     const skipIds: string[] = [];
 
-    for (const e of effects) {
+    for (const e of skipEffects) {
       let card: Card | null = null;
       try {
         card = this.cards.getCardById(e.cardId);
@@ -1199,7 +1117,6 @@ export class RoundComponent implements OnInit, OnDestroy {
     throw new Error('__SKIP_CONSUMED__');
   }
 
-  // ✅ Skip-indikatorer uten polling: bygges fra cache når vi har den
   playerHasSkip: Record<string, boolean> = {};
   private lastSkipScanAt = 0;
 
@@ -1211,26 +1128,25 @@ export class RoundComponent implements OnInit, OnDestroy {
     if (now - this.lastSkipScanAt < 2500) return;
     this.lastSkipScanAt = now;
 
-    try {
-      await this.ensureEffectsCacheLoaded(sessionId);
-    } catch {
-      return;
-    }
-
     const map: Record<string, boolean> = {};
-    for (const p of this.players) {
-      const hasSkip = this.effectsCache.some((e) => {
-        if (e.playerId !== p.id) return false;
-        if (e.effectType !== 'curse') return false;
+    await Promise.all(
+      this.players.map(async (p) => {
         try {
-          const c = this.cards.getCardById(e.cardId);
-          return (c.passive ?? []).includes('skip');
+          const effects = await this.gameSession.getPlayerEffectsForSession(sessionId, p.id);
+          map[p.id] = effects.some((e) => {
+            if (e.effectType !== 'curse') return false;
+            try {
+              const c = this.cards.getCardById(e.cardId);
+              return (c.passive ?? []).includes('skip');
+            } catch {
+              return false;
+            }
+          });
         } catch {
-          return false;
+          map[p.id] = false;
         }
-      });
-      map[p.id] = hasSkip;
-    }
+      })
+    );
 
     this.playerHasSkip = map;
   }

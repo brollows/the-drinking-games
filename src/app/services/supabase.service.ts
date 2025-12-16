@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 @Injectable({
   providedIn: 'root',
@@ -12,33 +12,13 @@ export class SupabaseService {
     const supabaseUrl = 'https://guxojebtwtjblcnijcfi.supabase.co';
     const supabaseKey = 'sb_publishable_g-YrFqCrsofmPLVmjmTCzA_xO6QtSvi';
 
-    this.supabase = createClient(supabaseUrl, supabaseKey, {
-      realtime: {
-        params: {
-          // Free-prosjekt: hold det enkelt og stabilt
-          eventsPerSecond: 10,
-        },
-      },
-    });
+    this.supabase = createClient(supabaseUrl, supabaseKey);
 
     this.testConnectionOnce();
   }
 
   get client() {
     return this.supabase;
-  }
-
-  createChannel(name: string): RealtimeChannel {
-    return this.supabase.channel(name);
-  }
-
-  async removeChannel(ch: RealtimeChannel | null | undefined): Promise<void> {
-    if (!ch) return;
-    try {
-      await this.supabase.removeChannel(ch);
-    } catch {
-      // ignore
-    }
   }
 
   private async testConnectionOnce() {

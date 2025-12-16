@@ -6,16 +6,13 @@ import { isPlatformBrowser } from '@angular/common';
 })
 export class PlayerService {
   private _name: string | null = null;
-  private readonly STORAGE_KEY = 'playerName';
 
   constructor(@Inject(PLATFORM_ID) private platformId: Object) {
-    if (!this.isBrowser()) return;
-
-    const saved = localStorage.getItem(this.STORAGE_KEY);
-    const normalized = this.normalizeName(saved);
-
-    if (normalized) {
-      this._name = normalized;
+    if (this.isBrowser()) {
+      const saved = localStorage.getItem('playerName');
+      if (saved) {
+        this._name = saved;
+      }
     }
   }
 
@@ -23,28 +20,11 @@ export class PlayerService {
     return isPlatformBrowser(this.platformId);
   }
 
-  private normalizeName(name: string | null | undefined): string | null {
-    const n = (name ?? '').trim();
-    return n.length ? n : null;
-  }
-
   setName(name: string) {
-    const normalized = this.normalizeName(name);
-    this._name = normalized;
+    this._name = name;
 
-    if (!this.isBrowser()) return;
-
-    if (normalized) {
-      localStorage.setItem(this.STORAGE_KEY, normalized);
-    } else {
-      localStorage.removeItem(this.STORAGE_KEY);
-    }
-  }
-
-  clearName() {
-    this._name = null;
     if (this.isBrowser()) {
-      localStorage.removeItem(this.STORAGE_KEY);
+      localStorage.setItem('playerName', name);
     }
   }
 
@@ -53,6 +33,6 @@ export class PlayerService {
   }
 
   hasName(): boolean {
-    return !!this._name;
+    return this._name !== null;
   }
 }
