@@ -3,7 +3,9 @@
     <router-outlet></router-outlet>
   </main>
 
-  <footer *ngIf="showHomeButton">
+  @if (showHomeButton) {
+  <footer>
     <button class="btn secondary" [routerLink]="['/']">⬅ Home</button>
   </footer>
+  }
 </div>
