@@ -4,6 +4,8 @@ import { GameSession, GameSessionService, Player } from '../../services/game-ses
 import { PlayerService } from '../../services/player.service';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { SupabaseService } from '../../services/supabase.service';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 @Component({
   selector: 'app-play',
@@ -17,43 +19,80 @@ export class PlayComponent implements OnInit, OnDestroy {
   playerName: string | null = null;
   players: Player[] = [];
 
-  private pollingInterval: any = null;
+  private rtChannel: RealtimeChannel | null = null;
+
+  // debounce
+  private loadTimer: any = null;
+
+  // optional failsafe (lav frekvens)
+  private failsafeInterval: any = null;
 
   constructor(
     private router: Router,
     private gameSession: GameSessionService,
     private player: PlayerService,
-    private cdr: ChangeDetectorRef // 👈 ny
+    private cdr: ChangeDetectorRef,
+    private supabase: SupabaseService
   ) {}
 
-  ngOnInit(): void {
+  async ngOnInit(): Promise<void> {
     this.session = this.gameSession.currentSession;
     this.playerName = this.player.getName();
 
-    if (!this.session) {
-      return;
-    }
+    if (!this.session) return;
 
-    this.loadPlayers();
+    await this.loadPlayers();
 
-    // 🔥 Start polling av spillere
-    this.pollingInterval = setInterval(() => {
-      this.loadPlayers();
-    }, 500); // hvert 0.5 sekund
+    this.setupRealtime();
+
+    // failsafe: hvis realtime skulle dø i gratisoppsett/nettverk
+    this.failsafeInterval = setInterval(() => {
+      this.scheduleLoad(0);
+    }, 20000);
   }
 
-  ngOnDestroy(): void {
-    // 🧹 Rydd opp så vi ikke får memory leaks
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-    }
+  async ngOnDestroy(): Promise<void> {
+    if (this.loadTimer) clearTimeout(this.loadTimer);
+    if (this.failsafeInterval) clearInterval(this.failsafeInterval);
+    await this.supabase.removeChannel(this.rtChannel);
+    this.rtChannel = null;
+  }
+
+  private setupRealtime() {
+    if (!this.session) return;
+
+    const sessionId = this.session.id;
+
+    // Én channel med flere "postgres_changes"
+    this.rtChannel = this.supabase
+      .createChannel(`play:${sessionId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'players', filter: `session_id=eq.${sessionId}` },
+        () => this.scheduleLoad(50)
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'game_sessions', filter: `id=eq.${sessionId}` },
+        () => this.scheduleLoad(50)
+      )
+      .subscribe((status) => {
+        console.log('[Realtime][play] status:', status);
+      });
+  }
+
+  private scheduleLoad(ms: number = 80) {
+    if (this.loadTimer) clearTimeout(this.loadTimer);
+    this.loadTimer = setTimeout(() => {
+      this.loadTimer = null;
+      this.loadPlayers();
+    }, ms);
   }
 
   private async loadPlayers() {
     if (!this.session) return;
 
     try {
-      // Hent både players og session-parallel
       const [players, session] = await Promise.all([
         this.gameSession.getPlayersForSession(this.session.id),
         this.gameSession.fetchSessionById(this.session.id),
@@ -65,26 +104,21 @@ export class PlayComponent implements OnInit, OnDestroy {
         console.log('Players oppdatert:', this.players);
       }
 
-      // Oppdatér session-lokalt (ny phase etc.)
-      if (session) {
-        this.session = session;
-      }
+      // Oppdatér session-lokalt
+      if (session) this.session = session;
 
-      // Hvis phase er 'round' -> naviger til /round/:sessionId
+      // Hvis phase er 'round' -> naviger
       if (this.session && this.session.phase === 'round') {
         try {
           await this.router.navigate(['/round', this.session.id]);
         } catch {
-          // ignorer navi-feil i polling
+          // ignore
         }
       }
 
-      // Tving rerender
       try {
         this.cdr.detectChanges();
-      } catch {
-        // kan feile hvis view er destroyed
-      }
+      } catch {}
     } catch (e) {
       console.error('Kunne ikke hente players/session:', e);
     }
@@ -95,24 +129,17 @@ export class PlayComponent implements OnInit, OnDestroy {
   }
 
   getSessionCode() {
-    if (!this.session?.joinCode) {
-      return '';
-    }
-    return this.session.joinCode;
+    return this.session?.joinCode ?? '';
   }
 
   async onStartRound() {
-    if (!this.session || this.showSettingsModal) {
-      return;
-    }
+    if (!this.session || this.showSettingsModal) return;
 
     try {
-      // Oppdater state i databasen – dette er signalet til alle andre
       await this.gameSession.setSessionPhase(this.session.id, 'round');
       await this.gameSession.applyStartLivesToPlayers(this.session.id);
       await this.gameSession.startRound(this.session.id);
 
-      // Host går direkte til round-siden
       await this.router.navigate(['/round', this.session.id]);
     } catch (e) {
       console.error('Kunne ikke starte runde:', e);
@@ -121,12 +148,11 @@ export class PlayComponent implements OnInit, OnDestroy {
 
   showSettingsModal = false;
 
-  startLivesDraft: number = 40; // default fallback
+  startLivesDraft: number = 40;
   startLivesMin = 1;
   startLivesMax = 200;
 
   openSettingsModal() {
-    // ta verdi fra session hvis den finnes
     this.startLivesDraft = this.session?.startLives ?? 40;
     this.showSettingsModal = true;
   }
@@ -145,7 +171,6 @@ export class PlayComponent implements OnInit, OnDestroy {
 
     try {
       await this.gameSession.setStartLives(this.session.id, v);
-      // refresh local session
       this.session = await this.gameSession.fetchSessionById(this.session.id);
       this.showSettingsModal = false;
     } catch (e) {

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { SupabaseService } from './supabase.service';
-import { Card, CardType } from '../cards/card';
+import { CardType } from '../cards/card';
 
 export interface GameSession {
   id: string;
@@ -35,7 +35,6 @@ export interface RoundState {
   pendingAttackFromPlayerId: string | null;
   pendingAttackToPlayerId: string | null;
 
-  // ✅ NEW (reflect support)
   pendingAttackFixedTotal?: number | null;
   pendingAttackIsReflect?: boolean;
 }
@@ -71,7 +70,6 @@ export class GameSessionService {
   async createHostSession(hostName: string): Promise<GameSession> {
     const joinCode = this.generateJoinCode();
 
-    // 1) Opprett session i Supabase
     const { data: session, error: sessionError } = await this.supabase.client
       .from('game_sessions')
       .insert({
@@ -97,7 +95,6 @@ export class GameSessionService {
 
     this._currentSession = newSession;
 
-    // 2) Registrer host som player i `players`
     const { data: player, error: playerError } = await this.supabase.client
       .from('players')
       .insert({
@@ -150,7 +147,6 @@ export class GameSessionService {
       throw new Error('Mangler kode eller navn');
     }
 
-    // 1) Finn session basert på kode
     const { data: session, error: sessionError } = await this.supabase.client
       .from('game_sessions')
       .select('*')
@@ -177,7 +173,6 @@ export class GameSessionService {
 
     this._currentSession = joinedSession;
 
-    // 2) Opprett player i `players`
     const { data: player, error: playerError } = await this.supabase.client
       .from('players')
       .insert({
@@ -223,9 +218,7 @@ export class GameSessionService {
       throw error;
     }
 
-    if (!data) {
-      return [];
-    }
+    if (!data) return [];
 
     return data.map((p) => ({
       id: p.id,
@@ -265,9 +258,7 @@ export class GameSessionService {
       throw error;
     }
 
-    if (!data) {
-      return null;
-    }
+    if (!data) return null;
 
     const sess: GameSession = {
       id: data.id,
@@ -351,8 +342,6 @@ export class GameSessionService {
         last_card_type: 'attack',
         last_from_player_id: fromPlayerId,
         last_to_player_id: toPlayerId,
-
-        // ✅ reset reflect fields for new attack
         pending_attack_fixed_total: null,
         pending_attack_is_reflect: false,
       })
@@ -429,21 +418,14 @@ export class GameSessionService {
 
   async advanceTurn(sessionId: string): Promise<void> {
     const roundState = await this.getRoundState(sessionId);
-    if (!roundState) {
-      throw new Error('Ingen round_state for session');
-    }
-
-    if (!roundState.turnOrder.length) {
-      return;
-    }
+    if (!roundState) throw new Error('Ingen round_state for session');
+    if (!roundState.turnOrder.length) return;
 
     const nextIndex = (roundState.currentTurnIndex + 1) % roundState.turnOrder.length;
 
     const { error } = await this.supabase.client
       .from('round_state')
-      .update({
-        current_turn_index: nextIndex,
-      })
+      .update({ current_turn_index: nextIndex })
       .eq('session_id', sessionId);
 
     if (error) {
@@ -461,6 +443,30 @@ export class GameSessionService {
 
     if (error) {
       console.error('Feil ved henting av player_effects:', error);
+      throw error;
+    }
+
+    if (!data) return [];
+
+    return data.map((e) => ({
+      id: e.id,
+      sessionId: e.session_id,
+      playerId: e.player_id,
+      cardId: e.card_id,
+      effectType: e.effect_type,
+      createdAt: e.created_at,
+    })) as PlayerEffect[];
+  }
+
+  // ✅ NY: hent ALT i ett kall (kutter N kall i UI)
+  async getAllPlayerEffectsForSession(sessionId: string): Promise<PlayerEffect[]> {
+    const { data, error } = await this.supabase.client
+      .from('player_effects')
+      .select('*')
+      .eq('session_id', sessionId);
+
+    if (error) {
+      console.error('Feil ved henting av alle player_effects:', error);
       throw error;
     }
 
@@ -500,7 +506,6 @@ export class GameSessionService {
       throw new Error('Dette angrepet er ikke på denne spilleren.');
     }
 
-    // ✅ hvis reflect: bruk DB-låst total (ikke hva klienten sender inn)
     if (
       roundState.pendingAttackIsReflect &&
       roundState.pendingAttackFixedTotal !== null &&
@@ -557,10 +562,8 @@ export class GameSessionService {
         pending_attack_card_id: null,
         pending_attack_from_player_id: null,
         pending_attack_to_player_id: null,
-
         pending_attack_fixed_total: null,
         pending_attack_is_reflect: false,
-
         current_turn_index: nextIndex,
       })
       .eq('session_id', sessionId);
@@ -588,8 +591,8 @@ export class GameSessionService {
 
   async reflectPendingAttack(
     sessionId: string,
-    reflectorId: string, // (originalTargetId i signaturen din)
-    sendToPlayerId: string, // (attackerId i signaturen din)
+    reflectorId: string,
+    sendToPlayerId: string,
     fixedTotal: number,
     usedEffectIds: string[]
   ): Promise<void> {
@@ -599,20 +602,16 @@ export class GameSessionService {
       throw new Error('Ingen aktivt angrep å reflecte.');
     }
 
-    // ✅ reflect kan bare trykkes av den som er TARGET akkurat nå
     if (rs.pendingAttackToPlayerId !== reflectorId) {
       throw new Error('Dette angrepet er ikke på denne spilleren (reflect).');
     }
 
-    // ✅ vi forventer at du sender tilbake til den som er "from" akkurat nå
-    // (det gjør RoundComponent ved å sende attackerId = rs.pendingAttackFromPlayerId)
     if (!rs.pendingAttackFromPlayerId || rs.pendingAttackFromPlayerId !== sendToPlayerId) {
       throw new Error('Mottaker matcher ikke round_state (reflect).');
     }
 
     if (fixedTotal < 0) fixedTotal = 0;
 
-    // ✅ slett brukte effects på den som reflecter (valgfritt, men passer modellen din)
     if (usedEffectIds && usedEffectIds.length > 0) {
       const { error: delError } = await this.supabase.client
         .from('player_effects')
@@ -625,20 +624,14 @@ export class GameSessionService {
       }
     }
 
-    // ✅ BOUNCE:
-    // - den som trykker reflect blir ny "from"
-    // - den du sender til blir ny "to"
     const { error: rsError } = await this.supabase.client
       .from('round_state')
       .update({
         pending_attack: true,
         pending_attack_from_player_id: reflectorId,
         pending_attack_to_player_id: sendToPlayerId,
-
         pending_attack_fixed_total: fixedTotal,
         pending_attack_is_reflect: true,
-
-        // (anbefalt for UI/tekst)
         last_from_player_id: reflectorId,
         last_to_player_id: sendToPlayerId,
         last_card_id: rs.pendingAttackCardId,
@@ -667,12 +660,11 @@ export class GameSessionService {
       this._currentSession = { ...this._currentSession, startLives };
     }
   }
+
   async applyStartLivesToPlayers(sessionId: string): Promise<void> {
-    // 1) hent start_lives for session
     const session = await this.fetchSessionById(sessionId);
     const startLives = session?.startLives ?? 40;
 
-    // 2) sett lives for alle players i sessionen
     const { error } = await this.supabase.client
       .from('players')
       .update({ lives: startLives })
