@@ -69,7 +69,7 @@
               [style.transform]="wheelTransform"
               [style.transition]="wheelTransition"
             >
-              @for (p of wheelReelItems; track p.id) {
+              @for (p of wheelReelItems; track $index) {
               <div class="wheel-item-vertical">
                 {{ p.name }}
               </div>

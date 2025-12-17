@@ -12,7 +12,18 @@ export class SupabaseService {
     const supabaseUrl = 'https://guxojebtwtjblcnijcfi.supabase.co';
     const supabaseKey = 'sb_publishable_g-YrFqCrsofmPLVmjmTCzA_xO6QtSvi';
 
-    this.supabase = createClient(supabaseUrl, supabaseKey);
+    this.supabase = createClient(supabaseUrl, supabaseKey, {
+      realtime: {
+        params: {
+          eventsPerSecond: 25,
+        },
+      },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    });
 
     this.testConnectionOnce();
   }
@@ -25,9 +36,7 @@ export class SupabaseService {
     if (SupabaseService.hasTestedConnection) return;
     SupabaseService.hasTestedConnection = true;
 
-    console.log('Tester Supabase connection...');
-
-    const { error } = await this.supabase.from('game_sessions').select('*').limit(1);
+    const { error } = await this.supabase.from('game_sessions').select('id').limit(1);
 
     if (error) {
       console.error('Supabase ERROR:', error);

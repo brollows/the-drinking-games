@@ -1,4 +1,3 @@
-// round.ts
 import { Component, OnInit, ChangeDetectorRef, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -26,9 +25,6 @@ export class RoundComponent implements OnInit, OnDestroy {
 
   viewState: 'playing' | 'waiting' | 'drinking' | 'lost' | 'finished' = 'waiting';
 
-  // =========================
-  // ✅ WINNING / PODIUM
-  // =========================
   get isGameFinished(): boolean {
     const alive = this.players.filter((p) => (p.lives ?? 0) > 0);
     return this.players.length >= 2 && alive.length <= 1;
@@ -43,7 +39,6 @@ export class RoundComponent implements OnInit, OnDestroy {
       if (n !== 0) return n;
       return (a.id ?? '').localeCompare(b.id ?? '');
     });
-
     return sorted.slice(0, 3);
   }
 
@@ -92,7 +87,6 @@ export class RoundComponent implements OnInit, OnDestroy {
   private currentAttackKey: string | null = null;
 
   private me: Player | null = null;
-  private pollingInterval: any = null;
 
   expectedEffectCount = 0;
   effectDotArray: null[] = [];
@@ -101,10 +95,8 @@ export class RoundComponent implements OnInit, OnDestroy {
 
   private animState: AttackAnimState = 'idle';
 
-  // ✅ per-button lock (ikke global)
   private btnLocks: Record<string, number> = {};
 
-  // ✅ RANDOM overlay + wheel (tivoli)
   randomOverlayVisible = false;
   randomOverlayHiding = false;
   randomPhase: RandomPhase = 'idle';
@@ -121,15 +113,11 @@ export class RoundComponent implements OnInit, OnDestroy {
   private randomSpinTimer: any = null;
   private randomFadeTimer: any = null;
 
-  // wheel layout constants
   private readonly WHEEL_ITEM_H = 42;
-  private readonly WHEEL_VISIBLE_CENTER_OFFSET = 2;
   private readonly WHEEL_WINDOW_H = 160;
 
-  // ✅ REFLECT UI state
   reflectAvailable = false;
   reflectorPlayer: Player | null = null;
-
   private reflectEffectIndex: number | null = null;
 
   get reflectUiReady(): boolean {
@@ -137,6 +125,18 @@ export class RoundComponent implements OnInit, OnDestroy {
     if (this.reflectEffectIndex === null) return false;
     return this.effectRevealCount > this.reflectEffectIndex;
   }
+
+  private unsubPlayers: (() => void) | null = null;
+  private unsubRoundState: (() => void) | null = null;
+
+  private safetyResyncTimer: any = null;
+  private lastResyncAt = 0;
+  private resyncInFlight = false;
+
+  private effectsCache: PlayerEffect[] = [];
+  private lastEffectsFetchAt = 0;
+
+  private onVisibilityChange: (() => void) | null = null;
 
   constructor(
     private route: ActivatedRoute,
@@ -158,32 +158,54 @@ export class RoundComponent implements OnInit, OnDestroy {
       return;
     }
 
-    console.log('Round page for session:', this.sessionId);
-
     this.me = this.gameSession.currentPlayer ?? null;
 
     this.dealInitialHand();
+    await this.fullResync();
 
-    await this.refreshState();
+    this.unsubPlayers = this.gameSession.subscribeToPlayers(this.sessionId, () => {
+      this.fullResyncThrottled(150);
+    });
 
-    this.pollingInterval = setInterval(() => {
-      this.refreshState();
-    }, 500);
+    this.unsubRoundState = this.gameSession.subscribeToRoundState(this.sessionId, (rs) => {
+      this.roundState = rs;
+      this.fullResyncThrottled(0);
+    });
+
+    this.safetyResyncTimer = setInterval(() => {
+      this.fullResyncThrottled(0);
+    }, 7000);
+
+    this.startHardSync();
+
+    this.onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        this.fullResyncThrottled(0);
+      }
+    };
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
   }
 
   ngOnDestroy(): void {
-    if (this.pollingInterval) clearInterval(this.pollingInterval);
+    if (this.unsubPlayers) this.unsubPlayers();
+    if (this.unsubRoundState) this.unsubRoundState();
+    if (this.safetyResyncTimer) clearInterval(this.safetyResyncTimer);
+
+    if (this.onVisibilityChange) {
+      document.removeEventListener('visibilitychange', this.onVisibilityChange);
+      this.onVisibilityChange = null;
+    }
+
     this.stopAttackAnimation();
     this.stopRandomTimers();
+
+    this.stopHardSync();
   }
 
   goHome() {
     this.router.navigate(['/']);
   }
 
-  // =========================
-  // ✅ per-button lock helpers
-  // =========================
   isBtnLocked(key: string): boolean {
     const until = this.btnLocks[key] ?? 0;
     return Date.now() < until;
@@ -209,22 +231,50 @@ export class RoundComponent implements OnInit, OnDestroy {
     return !!this.roundState?.pendingAttackIsReflect;
   }
 
-  private async refreshState() {
+  private fullResyncThrottled(minDelayMs: number) {
+    const now = Date.now();
+    if (now - this.lastResyncAt < minDelayMs) return;
+
+    this.lastResyncAt = now;
+
+    if (this.resyncInFlight) return;
+    this.resyncInFlight = true;
+
+    void this.fullResync().finally(() => {
+      this.resyncInFlight = false;
+    });
+  }
+
+  private isMaintenanceLeader(): boolean {
+    const me = this.me;
+    if (!me) return false;
+
+    const host = this.players.find((p) => p.isHost);
+    if (host) return host.id === me.id;
+
+    const alive = this.players.filter((p) => (p.lives ?? 0) > 0);
+    const ids = (alive.length ? alive : this.players).map((p) => p.id).sort();
+    return ids.length ? ids[0] === me.id : false;
+  }
+
+  private async fullResync() {
     if (!this.sessionId) return;
 
     try {
-      const [players, roundState] = await Promise.all([
+      const [players, rs] = await Promise.all([
         this.gameSession.getPlayersForSession(this.sessionId),
-        this.gameSession.getRoundState(this.sessionId),
+        this.roundState
+          ? Promise.resolve(this.roundState)
+          : this.gameSession.getRoundState(this.sessionId),
       ]);
 
-      this.players = this.sortPlayersByTurnOrder(players, roundState);
-      this.roundState = roundState;
+      this.roundState = rs;
+      this.players = this.sortPlayersByTurnOrder(players, rs);
 
-      await this.refreshSkipIndicators();
+      await this.refreshEffectsCacheIfNeeded();
+      this.refreshSkipIndicatorsFromCache();
 
       const meId = this.me?.id ?? null;
-
       if (meId) {
         const meFromList = this.players.find((p) => p.id === meId) ?? null;
         if (meFromList) {
@@ -241,18 +291,17 @@ export class RoundComponent implements OnInit, OnDestroy {
         if (this.viewState !== 'finished') this.viewState = 'lost';
       }
 
-      if (roundState && roundState.turnOrder.length > 0) {
-        this.currentTurnPlayerId = roundState.turnOrder[roundState.currentTurnIndex] ?? null;
+      if (rs && rs.turnOrder.length > 0 && typeof rs.currentTurnIndex === 'number') {
+        this.currentTurnPlayerId = rs.turnOrder[rs.currentTurnIndex] ?? null;
       } else {
         this.currentTurnPlayerId = null;
       }
 
-      const skippedDead = await this.maybeSkipDeadTurn();
-      if (skippedDead) return;
+      // Leader-only repair: sørg for at current_turn_index peker på en eksisterende & levende spiller.
+      await this.maybeRepairInvalidTurnPointer();
 
       this.syncLastPlayedFromRoundState();
-
-      await this.syncPendingAttackEffects();
+      await this.syncPendingAttackEffectsFromCache();
 
       await this.maybeConsumeSkipTurn();
 
@@ -268,8 +317,81 @@ export class RoundComponent implements OnInit, OnDestroy {
       } catch {}
     } catch (e: any) {
       if (e?.message === '__SKIP_CONSUMED__') return;
-      console.error('Kunne ikke refreshState i round:', e);
+      console.error('Kunne ikke fullResync i round:', e);
     }
+  }
+
+  private async maybeRepairInvalidTurnPointer(): Promise<void> {
+    const rs = this.roundState;
+    const sessionId = this.sessionId;
+
+    if (!rs || !sessionId) return;
+    if (!rs.turnOrder?.length) return;
+    if (rs.pendingAttack) return;
+    if (this.isGameFinished) return;
+    if (!this.isMaintenanceLeader()) return;
+
+    const order = rs.turnOrder;
+    const len = order.length;
+
+    const playersById = new Map(this.players.map((p) => [p.id, p] as const));
+    const isAlive = (id: string | null | undefined) => {
+      if (!id) return false;
+      const p = playersById.get(id);
+      return !!p && (p.lives ?? 0) > 0;
+    };
+
+    let idx = rs.currentTurnIndex;
+
+    // 1) Hvis idx er ugyldig: sett til første levende
+    if (typeof idx !== 'number' || idx < 0 || idx >= len) {
+      const firstAlive = order.findIndex((id) => isAlive(id));
+      const safeIndex = firstAlive >= 0 ? firstAlive : 0;
+
+      await this.gameSession.repairTurnIndex(sessionId, safeIndex);
+      this.roundState = await this.gameSession.getRoundState(sessionId);
+      return;
+    }
+
+    // 2) Hvis currentId mangler i players (left) eller er død: finn neste levende
+    const currentId = order[idx] ?? null;
+    if (isAlive(currentId)) return;
+
+    let nextAliveIndex = -1;
+    for (let i = 1; i <= len; i++) {
+      const ni = (idx + i) % len;
+      const id = order[ni] ?? null;
+      if (isAlive(id)) {
+        nextAliveIndex = ni;
+        break;
+      }
+    }
+
+    if (nextAliveIndex >= 0) {
+      await this.gameSession.repairTurnIndex(sessionId, nextAliveIndex);
+      this.roundState = await this.gameSession.getRoundState(sessionId);
+      return;
+    }
+
+    // Ingen levende funnet – la det være (finish håndteres av isGameFinished)
+  }
+
+  private async refreshEffectsCacheIfNeeded(force: boolean = false) {
+    if (!this.sessionId) return;
+
+    const now = Date.now();
+    if (!force && now - this.lastEffectsFetchAt < 2500) return;
+
+    this.lastEffectsFetchAt = now;
+    try {
+      this.effectsCache = await this.gameSession.getAllPlayerEffectsForSession(this.sessionId);
+    } catch {
+      this.effectsCache = [];
+    }
+  }
+
+  private getEffectsForPlayerFromCache(playerId: string): PlayerEffect[] {
+    return (this.effectsCache ?? []).filter((e) => e.playerId === playerId);
   }
 
   private syncLastPlayedFromRoundState() {
@@ -317,74 +439,12 @@ export class RoundComponent implements OnInit, OnDestroy {
     }
 
     if (rs.pendingAttack) {
-      if (rs.pendingAttackToPlayerId === meId) {
-        this.viewState = 'drinking';
-      } else {
-        this.viewState = 'waiting';
-      }
+      this.viewState = rs.pendingAttackToPlayerId === meId ? 'drinking' : 'waiting';
       return;
     }
 
-    const currentTurnId = rs.turnOrder[rs.currentTurnIndex] ?? null;
-
-    if (currentTurnId === meId) {
-      this.viewState = 'playing';
-    } else {
-      this.viewState = 'waiting';
-    }
-  }
-
-  // =========================
-  // ✅ SKIP DEAD PLAYERS' TURNS
-  // =========================
-  private async maybeSkipDeadTurn(): Promise<boolean> {
-    const rs = this.roundState;
-    const sessionId = this.sessionId;
-    const me = this.me;
-
-    if (!rs || !sessionId || !me) return false;
-    if (!rs.turnOrder?.length) return false;
-    if (rs.pendingAttack) return false;
-    if (this.isGameFinished) return false;
-
-    const order = rs.turnOrder;
-    const len = order.length;
-    const currentId = order[rs.currentTurnIndex] ?? null;
-    if (!currentId) return false;
-
-    const livesOf = (id: string) => {
-      const p = this.players.find((x) => x.id === id);
-      return p?.lives ?? 1;
-    };
-
-    if (livesOf(currentId) > 0) return false;
-
-    let nextAliveId: string | null = null;
-    for (let i = 1; i <= len; i++) {
-      const idx = (rs.currentTurnIndex + i) % len;
-      const id = order[idx];
-      if (id && livesOf(id) > 0) {
-        nextAliveId = id;
-        break;
-      }
-    }
-
-    if (!nextAliveId) return false;
-    if (livesOf(me.id) <= 0) return false;
-
-    if (me.id !== nextAliveId) return true;
-
-    let safety = len + 2;
-    while (safety-- > 0) {
-      const cid = order[rs.currentTurnIndex] ?? null;
-      if (cid && livesOf(cid) > 0) break;
-
-      await this.gameSession.advanceTurn(sessionId);
-      rs.currentTurnIndex = (rs.currentTurnIndex + 1) % len;
-    }
-
-    this.viewState = 'waiting';
-    return true;
+    const currentTurnId = rs.turnOrder?.[rs.currentTurnIndex] ?? null;
+    this.viewState = currentTurnId === meId ? 'playing' : 'waiting';
   }
 
   private buildHandWithOneOfEach(remaining: Card[] = []) {
@@ -393,16 +453,12 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     for (const type of types) {
       const idx = remaining.findIndex((c) => c.type === type);
-      if (idx !== -1) {
-        newHand.push(remaining[idx]);
-      } else {
-        newHand.push(this.cards.drawRandom(type));
-      }
+      if (idx !== -1) newHand.push(remaining[idx]);
+      else newHand.push(this.cards.drawRandom(type));
     }
 
     this.hand = newHand;
     this.selectedIndex = this.hand.length > 0 ? this.hand.length - 1 : null;
-    console.log('Ny hånd (1 av hver type):', this.hand);
   }
 
   private dealInitialHand() {
@@ -457,7 +513,7 @@ export class RoundComponent implements OnInit, OnDestroy {
       }
 
       if (card.type === 'attack' && this.isCardRandom(card)) {
-        const alive = this.players.filter((p) => p.lives > 0);
+        const alive = this.players.filter((p) => (p.lives ?? 0) > 0);
         if (!alive.length) return;
 
         const idx = Math.floor(Math.random() * alive.length);
@@ -471,12 +527,8 @@ export class RoundComponent implements OnInit, OnDestroy {
       }
 
       if (card.type === 'attack' || card.type === 'curse') {
-        const candidates = this.players.filter((p) => p.id !== me.id && p.lives > 0);
-
-        if (!candidates.length) {
-          console.warn('Ingen gyldige targets å velge.');
-          return;
-        }
+        const candidates = this.players.filter((p) => p.id !== me.id && (p.lives ?? 0) > 0);
+        if (!candidates.length) return;
 
         this.selectingTarget = true;
         this.targetCandidates = candidates;
@@ -506,7 +558,6 @@ export class RoundComponent implements OnInit, OnDestroy {
     const sessionId = this.sessionId;
 
     if (!me || !sessionId) return;
-
     if (!this.canConfirmDrank) return;
 
     try {
@@ -520,6 +571,7 @@ export class RoundComponent implements OnInit, OnDestroy {
       await this.gameSession.resolveAttackClientSide(sessionId, me.id, total, effectIdsToDelete);
 
       this.usedEffectIds = [];
+      await this.refreshEffectsCacheIfNeeded(true);
     } catch (e) {
       console.error('Feil ved resolveAttackClientSide:', e);
     }
@@ -535,18 +587,14 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     if (!rs || !me || !sessionId) return;
     if (!rs.pendingAttack) return;
-
-    // ✅ reflect må være "klar" (revealed) før man kan trykke
     if (!this.reflectUiReady) return;
 
     try {
-      // ✅ når vi reflecter, sender vi totalen slik den er nå (etter at denne targetens effekter har blitt regnet)
       const fixedTotal =
         rs.pendingAttackFixedTotal != null
           ? Math.max(0, this.pendingAttackTotalDrinks ?? rs.pendingAttackFixedTotal)
           : Math.max(0, this.pendingAttackTotalDrinks ?? 0);
 
-      // ✅ angriper er alltid "current from" (så reflect kan bounce)
       const attackerId = rs.pendingAttackFromPlayerId;
       if (!attackerId) return;
 
@@ -563,6 +611,8 @@ export class RoundComponent implements OnInit, OnDestroy {
       this.usedEffectIds = [];
       this.reflectAvailable = false;
       this.reflectEffectIndex = null;
+
+      await this.refreshEffectsCacheIfNeeded(true);
     } catch (e) {
       console.error('Feil ved reflectPendingAttack:', e);
     }
@@ -616,12 +666,10 @@ export class RoundComponent implements OnInit, OnDestroy {
         e.cardId === card.id && e.effectType === effectType && !this.usedEffectIds.includes(e.id)
     );
 
-    if (effect) {
-      this.usedEffectIds.push(effect.id);
-    }
+    if (effect) this.usedEffectIds.push(effect.id);
   }
 
-  private async syncPendingAttackEffects() {
+  private async syncPendingAttackEffectsFromCache() {
     const rs = this.roundState;
     const sessionId = this.sessionId;
 
@@ -674,7 +722,6 @@ export class RoundComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // ✅ RANDOM ATTACK: ingen effekter
     if (this.isCardRandom(this.pendingAttackCard)) {
       this.pendingAttackEffects = [];
       this.attackSequenceCards = [this.pendingAttackCard];
@@ -689,43 +736,39 @@ export class RoundComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // ✅ Hent effekter på target (GJELDER OGSÅ reflect-angrep)
-    try {
-      this.pendingAttackEffects = await this.gameSession.getPlayerEffectsForSession(
-        sessionId,
-        rs.pendingAttackToPlayerId
-      );
-    } catch (e) {
-      console.error('Feil ved henting av pendingAttackEffects:', e);
-      this.pendingAttackEffects = [];
-    }
+    this.pendingAttackEffects = this.getEffectsForPlayerFromCache(rs.pendingAttackToPlayerId);
 
-    // ✅ reset usedEffectIds for hver beregning
     this.usedEffectIds = [];
 
     const curseCards: Card[] = this.pendingAttackEffects
       .filter((e) => e.effectType === 'curse')
-      .map((e) => this.cards.getCardById(e.cardId))
+      .map((e) => {
+        try {
+          return this.cards.getCardById(e.cardId);
+        } catch {
+          return null;
+        }
+      })
       .filter((c): c is Card => !!c)
       .filter((c) => !(c.passive ?? []).includes('skip'));
 
     const defenceCards: Card[] = this.pendingAttackEffects
       .filter((e) => e.effectType === 'defence')
-      .map((e) => this.cards.getCardById(e.cardId))
+      .map((e) => {
+        try {
+          return this.cards.getCardById(e.cardId);
+        } catch {
+          return null;
+        }
+      })
       .filter((c): c is Card => !!c);
 
     const cursePriority: Record<string, number> = { increase: 0, double: 1 };
-    const defencePriority: Record<string, number> = {
-      reflect: 0,
-      shield: 1,
-      reduce: 2,
-      half: 3,
-    };
+    const defencePriority: Record<string, number> = { reflect: 0, shield: 1, reduce: 2, half: 3 };
 
     const getPriority = (card: Card, map: Record<string, number>) => {
       const passives = card.passive ?? [];
       let best = Number.POSITIVE_INFINITY;
-
       for (const p of passives) {
         if (map[p] !== undefined) best = Math.min(best, map[p]);
       }
@@ -742,19 +785,14 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     const fullSeq = [this.pendingAttackCard, ...sortedCurse, ...sortedDefence];
 
-    // ---------------- EFFECT RESOLUTION ----------------
     let total = 0;
     let baseSet = false;
 
-    // ✅ BASE:
-    // - vanlig angrep: card.drinkAmount
-    // - reflect-angrep: pendingAttackFixedTotal (hvis finnes) er ny base
     const baseAttackTotal =
       rs.pendingAttackIsReflect && rs.pendingAttackFixedTotal != null
         ? rs.pendingAttackFixedTotal
         : this.pendingAttackCard.drinkAmount;
 
-    // først: apply attack + curses
     for (const card of fullSeq) {
       if (card.type === 'attack') {
         total = baseAttackTotal;
@@ -781,7 +819,6 @@ export class RoundComponent implements OnInit, OnDestroy {
       }
     }
 
-    // så: defence – reflect er manuell knapp, men den skal kunne bounce uansett
     for (const card of sortedDefence) {
       if (!baseSet) break;
       if (total === 0) break;
@@ -791,7 +828,7 @@ export class RoundComponent implements OnInit, OnDestroy {
       if (passives.includes('reflect')) {
         this.reflectAvailable = true;
         this.markEffectUsedForCard(card, 'defence');
-        break; // reflect vinner, stopp videre defence
+        break;
       }
 
       let used = false;
@@ -815,7 +852,6 @@ export class RoundComponent implements OnInit, OnDestroy {
       if (used) this.markEffectUsedForCard(card, 'defence');
     }
 
-    // visuals: stopp ved reflect hvis reflect finnes
     if (this.reflectAvailable) {
       const reflectIdx = fullSeq.findIndex(
         (c) => c.type === 'defence' && (c.passive ?? []).includes('reflect')
@@ -869,11 +905,7 @@ export class RoundComponent implements OnInit, OnDestroy {
 
   get canConfirmDrank(): boolean {
     if (this.viewState !== 'drinking') return true;
-
-    // ✅ hvis reflect er tilgjengelig og revealed, må man velge reflect eller vente? (du ønsket tidligere “må reflect først”)
-    // Her lar vi fortsatt "må reflect først" hvis den er klar:
     if (this.reflectUiReady) return false;
-
     if (this.expectedEffectCount <= 0) return true;
     return this.animState === 'done';
   }
@@ -881,7 +913,6 @@ export class RoundComponent implements OnInit, OnDestroy {
   get canConfirmReflect(): boolean {
     if (this.viewState !== 'drinking') return false;
     if (!this.reflectUiReady) return false;
-
     if (this.expectedEffectCount <= 0) return true;
     return this.animState === 'done';
   }
@@ -893,12 +924,173 @@ export class RoundComponent implements OnInit, OnDestroy {
     }
   }
 
+  private stopRandomTimers() {
+    if (this.randomCountdownTimer) clearInterval(this.randomCountdownTimer);
+    if (this.randomSpinTimer) clearTimeout(this.randomSpinTimer);
+    if (this.randomFadeTimer) clearTimeout(this.randomFadeTimer);
+    this.randomCountdownTimer = null;
+    this.randomSpinTimer = null;
+    this.randomFadeTimer = null;
+  }
+
+  private resetRandomOverlay() {
+    this.stopRandomTimers();
+    this.randomOverlayVisible = false;
+    this.randomOverlayHiding = false;
+    this.randomPhase = 'idle';
+    this.randomCountdown = 5;
+    this.randomWheelWinner = null;
+    this.wheelReelItems = [];
+    this.wheelTransform = 'translateY(0px)';
+    this.wheelTransition = 'none';
+    this.randomKey = null;
+  }
+
+  private startRandomSequenceIfNeeded() {
+    const rs = this.roundState;
+
+    if (!rs || !rs.pendingAttack || !this.isRandomPendingAttack) {
+      if (this.randomOverlayVisible || this.randomPhase !== 'idle') {
+        this.resetRandomOverlay();
+      }
+      return;
+    }
+
+    const key = `${rs.pendingAttackCardId}|${rs.pendingAttackFromPlayerId}|${rs.pendingAttackToPlayerId}`;
+    if (this.randomKey === key) return;
+
+    this.randomKey = key;
+
+    const alive = this.players.filter((p) => (p.lives ?? 0) > 0);
+    const baseList = [...alive].sort((a, b) => a.id.localeCompare(b.id));
+
+    this.randomWheelWinner = this.pendingAttackTarget ?? null;
+
+    this.randomOverlayVisible = true;
+    this.randomOverlayHiding = false;
+    this.randomPhase = 'countdown';
+    this.randomCountdown = 5;
+
+    this.buildWheelReel(baseList, this.randomWheelWinner);
+
+    this.wheelTransition = 'none';
+    this.wheelTransform = 'translateY(0px)';
+
+    this.stopRandomTimers();
+    this.randomCountdownTimer = setInterval(() => {
+      this.randomCountdown = Math.max(0, this.randomCountdown - 1);
+      try {
+        this.cdr.detectChanges();
+      } catch {}
+
+      if (this.randomCountdown <= 0) {
+        if (this.randomCountdownTimer) clearInterval(this.randomCountdownTimer);
+        this.randomCountdownTimer = null;
+
+        this.startWheelSpinToWinner();
+      }
+    }, 1000);
+
+    this.updateViewStateFromRoundState();
+  }
+
+  private buildWheelReel(baseList: Player[], winner: Player | null) {
+    const bufferCycles = 6;
+    const mainCycles = 24;
+    const totalCycles = bufferCycles + mainCycles + bufferCycles;
+
+    const reel: Player[] = [];
+    for (let i = 0; i < totalCycles; i++) {
+      reel.push(...baseList);
+    }
+
+    const winnerId = winner?.id ?? baseList[0]?.id ?? null;
+
+    let winnerIdxInBase = baseList.findIndex((p) => p.id === winnerId);
+    if (winnerIdxInBase < 0) winnerIdxInBase = 0;
+
+    const landingCycle = bufferCycles + (mainCycles - 3);
+    const landingBase = landingCycle * baseList.length;
+    const landingIndex = landingBase + winnerIdxInBase;
+
+    this.wheelReelItems = reel;
+
+    const startIndex = bufferCycles * baseList.length;
+    this._wheelStartIndex = startIndex;
+    this._wheelLandingIndex = landingIndex;
+
+    const startY = startIndex * this.WHEEL_ITEM_H;
+    this.wheelTransition = 'none';
+    this.wheelTransform = `translateY(-${startY}px)`;
+
+    try {
+      this.cdr.detectChanges();
+    } catch {}
+  }
+
+  private _wheelLandingIndex: number = 0;
+  private _wheelStartIndex: number = 0;
+
+  private startWheelSpinToWinner() {
+    if (!this.randomOverlayVisible) return;
+
+    this.randomPhase = 'spinning';
+
+    const landingIndex = this._wheelLandingIndex ?? 0;
+    const startIndex = this._wheelStartIndex ?? 0;
+
+    const startY = startIndex * this.WHEEL_ITEM_H;
+    this.wheelTransition = 'none';
+    this.wheelTransform = `translateY(-${startY}px)`;
+
+    const safeMargin = 1;
+    const halfItem = this.WHEEL_ITEM_H / 2;
+
+    const randomOffset =
+      Math.random() * (this.WHEEL_ITEM_H - safeMargin * 2) - halfItem + safeMargin;
+
+    const finalY =
+      landingIndex * this.WHEEL_ITEM_H + halfItem + randomOffset - this.WHEEL_WINDOW_H / 2;
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        this.wheelTransition = 'transform 10s cubic-bezier(0.08, 0.85, 0.12, 1)';
+        this.wheelTransform = `translateY(-${finalY}px)`;
+        try {
+          this.cdr.detectChanges();
+        } catch {}
+      });
+    });
+
+    this.randomSpinTimer = setTimeout(() => {
+      this.randomSpinTimer = null;
+      this.randomPhase = 'done';
+
+      this.randomOverlayHiding = true;
+
+      this.randomFadeTimer = setTimeout(() => {
+        this.randomFadeTimer = null;
+        this.randomOverlayVisible = false;
+        this.randomOverlayHiding = false;
+
+        this.updateViewStateFromRoundState();
+
+        try {
+          this.cdr.detectChanges();
+        } catch {}
+      }, 500);
+
+      try {
+        this.cdr.detectChanges();
+      } catch {}
+    }, 10000);
+  }
+
   private buildAttackKey(rs: RoundState, effects: PlayerEffect[]): string {
     const effectIds = effects
       .map((e) => e.id)
       .sort()
       .join(',');
-    // ✅ inkluder reflect flag + fixedTotal så anim resetter riktig ved bounce
     return `${rs.pendingAttackCardId}|${rs.pendingAttackToPlayerId}|${effectIds}|${
       rs.pendingAttackIsReflect ? 'R' : 'N'
     }|${rs.pendingAttackFixedTotal ?? ''}`;
@@ -936,10 +1128,7 @@ export class RoundComponent implements OnInit, OnDestroy {
           if (!baseSet) break;
 
           const passives = card.passive ?? [];
-          if (passives.includes('reflect')) {
-            // reflect endrer ikke total i animasjonen (det er en knapp)
-            break;
-          }
+          if (passives.includes('reflect')) break;
 
           for (const p of passives) {
             if (p === 'shield') total = 0;
@@ -1083,21 +1272,16 @@ export class RoundComponent implements OnInit, OnDestroy {
 
     if (!rs || !me || !sessionId) return;
 
-    const currentTurnId = rs.turnOrder[rs.currentTurnIndex] ?? null;
+    const currentTurnId = rs.turnOrder?.[rs.currentTurnIndex] ?? null;
     if (rs.pendingAttack) return;
     if (currentTurnId !== me.id) return;
 
-    let effects: PlayerEffect[] = [];
-    try {
-      effects = await this.gameSession.getPlayerEffectsForSession(sessionId, me.id);
-    } catch {
-      return;
-    }
-
-    const skipEffects = effects.filter((e) => e.effectType === 'curse');
+    const effects = this.getEffectsForPlayerFromCache(me.id);
     const skipIds: string[] = [];
 
-    for (const e of skipEffects) {
+    for (const e of effects) {
+      if (e.effectType !== 'curse') continue;
+
       let card: Card | null = null;
       try {
         card = this.cards.getCardById(e.cardId);
@@ -1114,218 +1298,29 @@ export class RoundComponent implements OnInit, OnDestroy {
     await this.gameSession.advanceTurn(sessionId);
 
     this.viewState = 'waiting';
+    await this.refreshEffectsCacheIfNeeded(true);
     throw new Error('__SKIP_CONSUMED__');
   }
 
   playerHasSkip: Record<string, boolean> = {};
-  private lastSkipScanAt = 0;
 
-  private async refreshSkipIndicators() {
-    const sessionId = this.sessionId;
-    if (!sessionId) return;
-
-    const now = Date.now();
-    if (now - this.lastSkipScanAt < 2500) return;
-    this.lastSkipScanAt = now;
-
+  private refreshSkipIndicatorsFromCache() {
     const map: Record<string, boolean> = {};
-    await Promise.all(
-      this.players.map(async (p) => {
+
+    for (const p of this.players) {
+      const effects = this.getEffectsForPlayerFromCache(p.id);
+      map[p.id] = effects.some((e) => {
+        if (e.effectType !== 'curse') return false;
         try {
-          const effects = await this.gameSession.getPlayerEffectsForSession(sessionId, p.id);
-          map[p.id] = effects.some((e) => {
-            if (e.effectType !== 'curse') return false;
-            try {
-              const c = this.cards.getCardById(e.cardId);
-              return (c.passive ?? []).includes('skip');
-            } catch {
-              return false;
-            }
-          });
+          const c = this.cards.getCardById(e.cardId);
+          return (c.passive ?? []).includes('skip');
         } catch {
-          map[p.id] = false;
+          return false;
         }
-      })
-    );
+      });
+    }
 
     this.playerHasSkip = map;
-  }
-
-  // =========================
-  // ✅ RANDOM OVERLAY SEQUENCE
-  // =========================
-  private resetRandomOverlay() {
-    this.stopRandomTimers();
-    this.randomOverlayVisible = false;
-    this.randomOverlayHiding = false;
-    this.randomPhase = 'idle';
-    this.randomCountdown = 5;
-    this.randomWheelWinner = null;
-    this.wheelReelItems = [];
-    this.wheelTransform = 'translateY(0px)';
-    this.wheelTransition = 'none';
-    this.randomKey = null;
-  }
-
-  private stopRandomTimers() {
-    if (this.randomCountdownTimer) clearInterval(this.randomCountdownTimer);
-    if (this.randomSpinTimer) clearTimeout(this.randomSpinTimer);
-    if (this.randomFadeTimer) clearTimeout(this.randomFadeTimer);
-    this.randomCountdownTimer = null;
-    this.randomSpinTimer = null;
-    this.randomFadeTimer = null;
-  }
-
-  private startRandomSequenceIfNeeded() {
-    const rs = this.roundState;
-
-    if (!rs || !rs.pendingAttack || !this.isRandomPendingAttack) {
-      if (this.randomOverlayVisible || this.randomPhase !== 'idle') {
-        this.resetRandomOverlay();
-      }
-      return;
-    }
-
-    const key = `${rs.pendingAttackCardId}|${rs.pendingAttackFromPlayerId}|${rs.pendingAttackToPlayerId}`;
-    if (this.randomKey === key) return;
-
-    this.randomKey = key;
-
-    const alive = this.players.filter((p) => p.lives > 0);
-    const baseList = [...alive].sort((a, b) => a.id.localeCompare(b.id));
-
-    this.randomWheelWinner = this.pendingAttackTarget ?? null;
-
-    this.randomOverlayVisible = true;
-    this.randomOverlayHiding = false;
-    this.randomPhase = 'countdown';
-    this.randomCountdown = 5;
-
-    console.log('[RANDOM]', {
-      me: this.me?.id,
-      baseList: baseList.map((p) => p.id),
-      winner: this.randomWheelWinner?.id,
-      rsTo: this.roundState?.pendingAttackToPlayerId,
-    });
-
-    this.buildWheelReel(baseList, this.randomWheelWinner);
-
-    this.wheelTransition = 'none';
-    this.wheelTransform = 'translateY(0px)';
-
-    this.stopRandomTimers();
-    this.randomCountdownTimer = setInterval(() => {
-      this.randomCountdown = Math.max(0, this.randomCountdown - 1);
-      try {
-        this.cdr.detectChanges();
-      } catch {}
-
-      if (this.randomCountdown <= 0) {
-        if (this.randomCountdownTimer) clearInterval(this.randomCountdownTimer);
-        this.randomCountdownTimer = null;
-
-        this.startWheelSpinToWinner();
-      }
-    }, 1000);
-
-    this.updateViewStateFromRoundState();
-  }
-
-  private buildWheelReel(baseList: Player[], winner: Player | null) {
-    const bufferCycles = 6;
-    const mainCycles = 24;
-    const totalCycles = bufferCycles + mainCycles + bufferCycles;
-
-    const reel: Player[] = [];
-
-    for (let i = 0; i < totalCycles; i++) {
-      reel.push(...baseList);
-    }
-
-    const winnerId = winner?.id ?? baseList[0]?.id ?? null;
-
-    let winnerIdxInBase = baseList.findIndex((p) => p.id === winnerId);
-    if (winnerIdxInBase < 0) winnerIdxInBase = 0;
-
-    const landingCycle = bufferCycles + (mainCycles - 3);
-    const landingBase = landingCycle * baseList.length;
-
-    const landingIndex = landingBase + winnerIdxInBase;
-
-    this.wheelReelItems = reel;
-
-    const startIndex = bufferCycles * baseList.length;
-    // @ts-ignore
-    this._wheelStartIndex = startIndex;
-    // @ts-ignore
-    this._wheelLandingIndex = landingIndex;
-
-    const startY = startIndex * this.WHEEL_ITEM_H;
-    this.wheelTransition = 'none';
-    this.wheelTransform = `translateY(-${startY}px)`;
-
-    try {
-      this.cdr.detectChanges();
-    } catch {}
-  }
-
-  // @ts-ignore
-  private _wheelLandingIndex: number = 0;
-  private _wheelStartIndex: number = 0;
-
-  private startWheelSpinToWinner() {
-    if (!this.randomOverlayVisible) return;
-
-    this.randomPhase = 'spinning';
-
-    const landingIndex = this._wheelLandingIndex ?? 0;
-    const startIndex = this._wheelStartIndex ?? 0;
-
-    const startY = startIndex * this.WHEEL_ITEM_H;
-    this.wheelTransition = 'none';
-    this.wheelTransform = `translateY(-${startY}px)`;
-
-    const safeMargin = 1;
-    const halfItem = this.WHEEL_ITEM_H / 2;
-
-    const randomOffset =
-      Math.random() * (this.WHEEL_ITEM_H - safeMargin * 2) - halfItem + safeMargin;
-
-    const finalY =
-      landingIndex * this.WHEEL_ITEM_H + halfItem + randomOffset - this.WHEEL_WINDOW_H / 2;
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        this.wheelTransition = 'transform 10s cubic-bezier(0.08, 0.85, 0.12, 1)';
-        this.wheelTransform = `translateY(-${finalY}px)`;
-        try {
-          this.cdr.detectChanges();
-        } catch {}
-      });
-    });
-
-    this.randomSpinTimer = setTimeout(() => {
-      this.randomSpinTimer = null;
-      this.randomPhase = 'done';
-
-      this.randomOverlayHiding = true;
-
-      this.randomFadeTimer = setTimeout(() => {
-        this.randomFadeTimer = null;
-        this.randomOverlayVisible = false;
-        this.randomOverlayHiding = false;
-
-        this.updateViewStateFromRoundState();
-
-        try {
-          this.cdr.detectChanges();
-        } catch {}
-      }, 500);
-
-      try {
-        this.cdr.detectChanges();
-      } catch {}
-    }, 10000);
   }
 
   private sortPlayersByTurnOrder(players: Player[], rs: RoundState | null): Player[] {
@@ -1344,5 +1339,37 @@ export class RoundComponent implements OnInit, OnDestroy {
 
       return ia - ib;
     });
+  }
+
+  private hardSyncTimer: any = null;
+  private lastRoundUpdatedAt: string | null = null;
+
+  private startHardSync() {
+    if (this.hardSyncTimer) return;
+
+    this.hardSyncTimer = setInterval(async () => {
+      if (!this.sessionId) return;
+      if (document.visibilityState !== 'visible') return;
+
+      try {
+        const rs = await this.gameSession.getRoundState(this.sessionId);
+        if (!rs) return;
+
+        const updatedAt = (rs as any).updated_at ?? (rs as any).updatedAt ?? null;
+
+        if (updatedAt && this.lastRoundUpdatedAt === updatedAt) return;
+
+        this.lastRoundUpdatedAt = updatedAt;
+        this.roundState = rs;
+
+        // Når round_state faktisk endrer seg: kjør en resync (throttlet + singleflight)
+        this.fullResyncThrottled(0);
+      } catch {}
+    }, 2000);
+  }
+
+  private stopHardSync() {
+    if (this.hardSyncTimer) clearInterval(this.hardSyncTimer);
+    this.hardSyncTimer = null;
   }
 }

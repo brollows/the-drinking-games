@@ -17,74 +17,81 @@ export class PlayComponent implements OnInit, OnDestroy {
   playerName: string | null = null;
   players: Player[] = [];
 
-  private pollingInterval: any = null;
+  showSettingsModal = false;
+
+  startLivesDraft: number = 40;
+  startLivesMin = 1;
+  startLivesMax = 200;
+
+  private unsubPlayers: (() => void) | null = null;
+  private unsubSession: (() => void) | null = null;
+
+  private safetyResyncTimer: any = null;
+  private lastLoadAt = 0;
 
   constructor(
     private router: Router,
     private gameSession: GameSessionService,
     private player: PlayerService,
-    private cdr: ChangeDetectorRef // 👈 ny
+    private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit(): void {
     this.session = this.gameSession.currentSession;
     this.playerName = this.player.getName();
 
-    if (!this.session) {
-      return;
-    }
+    if (!this.session) return;
 
-    this.loadPlayers();
+    this.loadPlayersAndSession();
 
-    // 🔥 Start polling av spillere
-    this.pollingInterval = setInterval(() => {
-      this.loadPlayers();
-    }, 500); // hvert 0.5 sekund
+    this.unsubPlayers = this.gameSession.subscribeToPlayers(this.session.id, () => {
+      this.loadPlayersAndSessionThrottled(150);
+    });
+
+    this.unsubSession = this.gameSession.subscribeToSession(this.session.id, () => {
+      this.loadPlayersAndSessionThrottled(150);
+    });
+
+    this.safetyResyncTimer = setInterval(() => {
+      this.loadPlayersAndSessionThrottled(0);
+    }, 7000);
   }
 
   ngOnDestroy(): void {
-    // 🧹 Rydd opp så vi ikke får memory leaks
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-    }
+    if (this.unsubPlayers) this.unsubPlayers();
+    if (this.unsubSession) this.unsubSession();
+    if (this.safetyResyncTimer) clearInterval(this.safetyResyncTimer);
   }
 
-  private async loadPlayers() {
+  private loadPlayersAndSessionThrottled(minDelayMs: number) {
+    const now = Date.now();
+    if (now - this.lastLoadAt < minDelayMs) return;
+    this.loadPlayersAndSession();
+  }
+
+  private async loadPlayersAndSession() {
     if (!this.session) return;
 
+    this.lastLoadAt = Date.now();
+
     try {
-      // Hent både players og session-parallel
       const [players, session] = await Promise.all([
         this.gameSession.getPlayersForSession(this.session.id),
         this.gameSession.fetchSessionById(this.session.id),
       ]);
 
-      // Oppdatér spillere hvis endret
-      if (JSON.stringify(players) !== JSON.stringify(this.players)) {
-        this.players = players;
-        console.log('Players oppdatert:', this.players);
-      }
+      if (players) this.players = players;
+      if (session) this.session = session;
 
-      // Oppdatér session-lokalt (ny phase etc.)
-      if (session) {
-        this.session = session;
-      }
-
-      // Hvis phase er 'round' -> naviger til /round/:sessionId
       if (this.session && this.session.phase === 'round') {
         try {
           await this.router.navigate(['/round', this.session.id]);
-        } catch {
-          // ignorer navi-feil i polling
-        }
+        } catch {}
       }
 
-      // Tving rerender
       try {
         this.cdr.detectChanges();
-      } catch {
-        // kan feile hvis view er destroyed
-      }
+      } catch {}
     } catch (e) {
       console.error('Kunne ikke hente players/session:', e);
     }
@@ -95,38 +102,24 @@ export class PlayComponent implements OnInit, OnDestroy {
   }
 
   getSessionCode() {
-    if (!this.session?.joinCode) {
-      return '';
-    }
-    return this.session.joinCode;
+    return this.session?.joinCode ?? '';
   }
 
   async onStartRound() {
-    if (!this.session || this.showSettingsModal) {
-      return;
-    }
+    if (!this.session || this.showSettingsModal) return;
 
     try {
-      // Oppdater state i databasen – dette er signalet til alle andre
       await this.gameSession.setSessionPhase(this.session.id, 'round');
       await this.gameSession.applyStartLivesToPlayers(this.session.id);
       await this.gameSession.startRound(this.session.id);
 
-      // Host går direkte til round-siden
       await this.router.navigate(['/round', this.session.id]);
     } catch (e) {
       console.error('Kunne ikke starte runde:', e);
     }
   }
 
-  showSettingsModal = false;
-
-  startLivesDraft: number = 40; // default fallback
-  startLivesMin = 1;
-  startLivesMax = 200;
-
   openSettingsModal() {
-    // ta verdi fra session hvis den finnes
     this.startLivesDraft = this.session?.startLives ?? 40;
     this.showSettingsModal = true;
   }
@@ -145,7 +138,6 @@ export class PlayComponent implements OnInit, OnDestroy {
 
     try {
       await this.gameSession.setStartLives(this.session.id, v);
-      // refresh local session
       this.session = await this.gameSession.fetchSessionById(this.session.id);
       this.showSettingsModal = false;
     } catch (e) {
