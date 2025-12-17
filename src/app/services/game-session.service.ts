@@ -18,6 +18,7 @@ export interface Player {
   sessionId: string;
   createdAt: string;
   lives: number;
+  eliminatedAt?: string | null;
 }
 
 export interface RoundState {
@@ -128,6 +129,7 @@ export class GameSessionService {
       sessionId: player.session_id,
       createdAt: player.created_at,
       lives: player.lives,
+      eliminatedAt: player.eliminated_at ?? null,
     };
 
     this._currentPlayer = newPlayer;
@@ -192,6 +194,7 @@ export class GameSessionService {
       sessionId: player.session_id,
       createdAt: player.created_at,
       lives: player.lives ?? START_LIVES,
+      eliminatedAt: player.eliminated_at ?? null,
     };
 
     this._currentPlayer = newPlayer;
@@ -247,6 +250,7 @@ export class GameSessionService {
       sessionId: p.session_id,
       createdAt: p.created_at,
       lives: p.lives,
+      eliminatedAt: p.eliminated_at ?? null,
     })) as Player[];
   }
 
@@ -611,9 +615,17 @@ export class GameSessionService {
 
     const newLives = Math.max(0, (target.lives ?? 0) - totalDrinks);
 
+    const justDied = newLives === 0 && target.eliminated_at == null;
+
+    const update: any = { lives: newLives };
+
+    if (justDied) {
+      update.eliminated_at = new Date().toISOString();
+    }
+
     const { error: livesError } = await this.supabase.client
       .from('players')
-      .update({ lives: newLives })
+      .update(update)
       .eq('id', targetPlayerId);
 
     if (livesError) {
@@ -750,7 +762,7 @@ export class GameSessionService {
 
     const { error } = await this.supabase.client
       .from('players')
-      .update({ lives: startLives })
+      .update({ lives: startLives, eliminated_at: null })
       .eq('session_id', sessionId);
 
     if (error) {

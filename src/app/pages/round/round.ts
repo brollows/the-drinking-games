@@ -32,13 +32,18 @@ export class RoundComponent implements OnInit, OnDestroy {
 
   get podiumPlayers(): Player[] {
     const sorted = [...this.players].sort((a, b) => {
-      const la = a.lives ?? 0;
-      const lb = b.lives ?? 0;
-      if (lb !== la) return lb - la;
-      const n = (a.name ?? '').localeCompare(b.name ?? '');
-      if (n !== 0) return n;
-      return (a.id ?? '').localeCompare(b.id ?? '');
+      const aAlive = (a.lives ?? 0) > 0;
+      const bAlive = (b.lives ?? 0) > 0;
+
+      if (aAlive !== bAlive) return aAlive ? -1 : 1;
+
+      if (aAlive && bAlive) return (b.lives ?? 0) - (a.lives ?? 0);
+
+      const ae = a.eliminatedAt ? new Date(a.eliminatedAt).getTime() : 0;
+      const be = b.eliminatedAt ? new Date(b.eliminatedAt).getTime() : 0;
+      return be - ae;
     });
+
     return sorted.slice(0, 3);
   }
 
