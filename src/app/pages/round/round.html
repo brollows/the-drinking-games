@@ -362,20 +362,17 @@
         <div class="podium-slot second">
           <div class="podium-rank">2</div>
           <div class="podium-name">{{ podiumPlayers[1].name }}</div>
-          <div class="podium-meta">{{ podiumPlayers[1].lives }} 🍻</div>
         </div>
         } @if (podiumPlayers[0]) {
         <div class="podium-slot first">
           <div class="podium-crown">👑</div>
           <div class="podium-rank">1</div>
           <div class="podium-name">{{ podiumPlayers[0].name }}</div>
-          <div class="podium-meta">{{ podiumPlayers[0].lives }} 🍻</div>
         </div>
         } @if (podiumPlayers[2]) {
         <div class="podium-slot third">
           <div class="podium-rank">3</div>
           <div class="podium-name">{{ podiumPlayers[2].name }}</div>
-          <div class="podium-meta">{{ podiumPlayers[2].lives }} 🍻</div>
         </div>
         }
       </div>
@@ -390,7 +387,6 @@
           <li class="standings-row">
             <span class="standings-rank">#{{ i + 1 }}</span>
             <span class="standings-name">{{ p.name }}</span>
-            <span class="standings-lives">{{ p.lives }} 🍻</span>
           </li>
           }
         </ul>
