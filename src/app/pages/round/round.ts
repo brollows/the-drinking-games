@@ -501,7 +501,7 @@ export class RoundComponent implements OnInit, OnDestroy {
 
   async onPlaySelectedCard() {
     if (this.isBtnLocked('playSelected')) return;
-    this.lockBtn('playSelected', 1000);
+    this.lockBtn('playSelected', 2000);
 
     const card = this.selectedCard;
     const me = this.me;
